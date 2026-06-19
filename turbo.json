@@ -4,8 +4,16 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": [
+        "CLOUDFLARE_ACCOUNT_ID",
+        "EVE_AGENT_PASSWORD",
+        "EVE_AGENT_USERNAME",
+        "R2_ACCESS_KEY_ID",
+        "R2_BUCKET",
+        "R2_SECRET_ACCESS_KEY"
+      ],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": [".next/**", "!.next/cache/**"]
+      "outputs": [".eve/**", ".next/**", "!.next/cache/**", ".vercel/output/**"]
     },
     "lint": {
       "dependsOn": ["^lint"]
