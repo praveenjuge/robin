@@ -10,6 +10,7 @@
 
 import type * as messages from "../messages.js"
 import type * as projects from "../projects.js"
+import type * as r2 from "../r2.js"
 
 import type {
   ApiFromModules,
@@ -20,6 +21,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   messages: typeof messages
   projects: typeof projects
+  r2: typeof r2
 }>
 
 /**

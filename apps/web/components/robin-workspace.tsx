@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useMutation, useQuery } from "convex/react"
+import { useAction, useMutation, useQuery } from "convex/react"
 import { Bot, Check, Download, Plus, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
@@ -25,7 +25,6 @@ import {
 import { api } from "@/convex/_generated/api"
 import type { Doc, Id } from "@/convex/_generated/dataModel"
 
-type InputResponse = { requestId: string; optionId: "approve" }
 type AgentResult = {
   message?: string
   sessionId?: string
@@ -36,12 +35,14 @@ type AgentResult = {
   proposedDocument?: string
   committedDocument?: string
 }
+type InputResponse = { requestId: string; optionId: "approve" }
 
 export function RobinWorkspace() {
   const projects = useQuery(api.projects.list)
   const createProject = useMutation(api.projects.create)
   const recordMessage = useMutation(api.messages.record)
   const saveAgentState = useMutation(api.projects.saveAgentState)
+  const approveDesign = useAction(api.r2.approveDesign)
   const [selectedId, setSelectedId] = useState<Id<"projects"> | null>(null)
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
@@ -57,7 +58,12 @@ export function RobinWorkspace() {
 
   useEffect(() => {
     if (!projects?.length) return
-    if (!selectedId || !projects.some(({ _id }) => _id === selectedId)) {
+    if (
+      !selectedId ||
+      !projects.some(
+        (projectItem: Doc<"projects">) => projectItem._id === selectedId
+      )
+    ) {
       setSelectedId(projects[0]!._id)
     }
   }, [projects, selectedId])
@@ -132,6 +138,24 @@ export function RobinWorkspace() {
     }
   }
 
+  async function approvePendingDesign() {
+    if (!project || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await approveDesign({ projectId: project._id })
+      await recordMessage({
+        projectId: project._id,
+        role: "assistant",
+        content: `Approved and saved design.md (${result.commitId}).`,
+      })
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Approval failed.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ProjectToolbar
@@ -153,7 +177,7 @@ export function RobinWorkspace() {
           />
           <DocumentPanel
             busy={busy}
-            onApprove={(responses) => sendTurn("", responses)}
+            onApprove={approvePendingDesign}
             project={project}
           />
         </div>
@@ -338,7 +362,7 @@ function DocumentPanel({
   project,
 }: {
   busy: boolean
-  onApprove: (responses: InputResponse[]) => void
+  onApprove: () => void
   project: Doc<"projects">
 }) {
   function download() {
@@ -379,18 +403,7 @@ function DocumentPanel({
         <section className="space-y-3 border-y py-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-medium">Pending diff</h3>
-            <Button
-              disabled={busy}
-              onClick={() =>
-                onApprove(
-                  requests.map(({ requestId }) => ({
-                    requestId,
-                    optionId: "approve",
-                  }))
-                )
-              }
-              size="sm"
-            >
+            <Button disabled={busy} onClick={onApprove} size="sm">
               <Check />
               Approve
             </Button>

@@ -1,5 +1,10 @@
 import { ConvexError, v } from "convex/values"
-import { mutation, query } from "./_generated/server"
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server"
 import type { Id } from "./_generated/dataModel"
 
 const starterDoc = `---
@@ -145,6 +150,48 @@ export const saveAgentState = mutation({
       patch.latestCommit = `r2-${Date.now().toString(36)}`
     }
     await ctx.db.patch(args.projectId as Id<"projects">, patch)
+    return null
+  },
+})
+
+export const getPendingApproval = internalQuery({
+  args: { ownerId: v.string(), projectId: v.id("projects") },
+  returns: v.union(
+    v.object({
+      proposedDocument: v.string(),
+    }),
+    v.null()
+  ),
+  async handler(ctx, { ownerId, projectId }) {
+    const project = await ctx.db.get(projectId)
+    if (!project || project.ownerId !== ownerId || !project.proposedDocument) {
+      return null
+    }
+    return { proposedDocument: project.proposedDocument }
+  },
+})
+
+export const applyApprovedDesign = internalMutation({
+  args: {
+    commitId: v.string(),
+    document: v.string(),
+    ownerId: v.string(),
+    projectId: v.id("projects"),
+  },
+  returns: v.null(),
+  async handler(ctx, { commitId, document, ownerId, projectId }) {
+    const project = await ctx.db.get(projectId)
+    if (!project || project.ownerId !== ownerId) {
+      throw new ConvexError("Project not found")
+    }
+    await ctx.db.patch(projectId as Id<"projects">, {
+      document,
+      latestCommit: commitId,
+      pendingDiff: "",
+      pendingRequests: [],
+      proposedDocument: "",
+      updatedAt: Date.now(),
+    })
     return null
   },
 })
