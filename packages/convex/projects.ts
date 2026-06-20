@@ -40,6 +40,14 @@ const projectFields = {
   document: v.string(),
   latestCommit: v.optional(v.string()),
   updatedAt: v.number(),
+  // Deprecated: retained as optional so query return validators accept rows
+  // that still carry legacy eve session state. See schema.ts.
+  eveSessionId: v.optional(v.string()),
+  eveContinuationToken: v.optional(v.string()),
+  eveStreamIndex: v.optional(v.number()),
+  pendingRequests: v.optional(v.array(v.object({ requestId: v.string() }))),
+  pendingDiff: v.optional(v.string()),
+  proposedDocument: v.optional(v.string()),
 }
 
 const projectValidator = v.object(projectFields)
