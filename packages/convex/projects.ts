@@ -40,11 +40,13 @@ const projectFields = {
   document: v.string(),
   latestCommit: v.optional(v.string()),
   updatedAt: v.number(),
-  // Deprecated: retained as optional so query return validators accept rows
-  // that still carry legacy eve session state. See schema.ts.
+  // The eve agent owns the durable session; Convex stores the cursor so the
+  // chat is recoverable across devices. See schema.ts.
   eveSessionId: v.optional(v.string()),
   eveContinuationToken: v.optional(v.string()),
   eveStreamIndex: v.optional(v.number()),
+  // Deprecated: legacy in-flight review state, retained so query return
+  // validators accept rows that still carry it. See schema.ts.
   pendingRequests: v.optional(v.array(v.object({ requestId: v.string() }))),
   pendingDiff: v.optional(v.string()),
   proposedDocument: v.optional(v.string()),
@@ -134,11 +136,6 @@ export const remove = mutation({
     if (!project || project.ownerId !== identity.subject) {
       throw new ConvexError("Project not found")
     }
-    const messages = await ctx.db
-      .query("messages")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .collect()
-    await Promise.all(messages.map((message) => ctx.db.delete(message._id)))
     const uploads = await ctx.db
       .query("uploads")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
@@ -176,6 +173,35 @@ export const saveDocument = mutation({
     await ctx.db.patch(projectId as Id<"projects">, {
       document,
       latestCommit: commitId ?? `r2-${Date.now().toString(36)}`,
+      updatedAt: Date.now(),
+    })
+    return null
+  },
+})
+
+// Persists the eve session cursor so the durable conversation is recoverable
+// across devices and reloads. eve owns the transcript itself; this row only
+// stores the handles needed to stream history (sessionId + streamIndex) and
+// resume the next turn (continuationToken).
+export const saveAgentSession = mutation({
+  args: {
+    projectId: v.id("projects"),
+    sessionId: v.optional(v.string()),
+    continuationToken: v.optional(v.string()),
+    streamIndex: v.optional(v.number()),
+  },
+  returns: v.null(),
+  async handler(ctx, { projectId, sessionId, continuationToken, streamIndex }) {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new ConvexError("Not authenticated")
+    const project = await ctx.db.get(projectId)
+    if (!project || project.ownerId !== identity.subject) {
+      throw new ConvexError("Project not found")
+    }
+    await ctx.db.patch(projectId as Id<"projects">, {
+      eveSessionId: sessionId,
+      eveContinuationToken: continuationToken,
+      eveStreamIndex: streamIndex,
       updatedAt: Date.now(),
     })
     return null

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useMutation, useQuery } from "convex/react"
@@ -43,6 +43,7 @@ import {
 } from "@/components/workspace/file-viewer"
 import { ReviewChangesDialog } from "@/components/workspace/review-changes-dialog"
 import { WorkspaceChat } from "@/components/workspace/workspace-chat"
+import type { ChatMessage } from "@/components/workspace/workspace-chat"
 import { api } from "@workspace/convex/api"
 import type { Doc, Id } from "@workspace/convex/dataModel"
 import { DESIGN_PATH, uploadTreePath } from "@/lib/files"
@@ -138,11 +139,10 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
 
   const project = useQuery(api.projects.get, { projectId: id })
   const projects = useQuery(api.projects.list)
-  const messages = useQuery(api.messages.list, { projectId: id })
   const uploads = useQuery(api.uploads.list, { projectId: id })
 
-  const recordMessage = useMutation(api.messages.record)
   const saveDocument = useMutation(api.projects.saveDocument)
+  const saveAgentSession = useMutation(api.projects.saveAgentSession)
   const renameProject = useMutation(api.projects.rename)
   const removeProject = useMutation(api.projects.remove)
   const generateUploadUrl = useMutation(api.uploads.generateUploadUrl)
@@ -163,8 +163,25 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const [agentState, setAgentState] = useState<AgentSnapshot>(() =>
     loadSnapshot(projectId)
   )
-  const session = agentState.session
+  // Cross-device recovery: when this device has no local cursor, fall back to
+  // the one persisted on the project row so the same conversation resumes
+  // elsewhere. Once a turn runs here, the local cursor takes over.
+  const session: SessionCursor | null =
+    agentState.session ??
+    (project?.eveSessionId
+      ? {
+          sessionId: project.eveSessionId,
+          continuationToken: project.eveContinuationToken,
+          streamIndex: project.eveStreamIndex,
+        }
+      : null)
   const pending = agentState.pending
+
+  // eve owns the durable transcript; the browser holds a render copy that is
+  // hydrated by replaying the session on load and appended optimistically as
+  // turns complete.
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const hydratedSessionRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -173,6 +190,40 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       JSON.stringify(agentState)
     )
   }, [projectId, agentState])
+
+  // Replay the session into the transcript once per session id. We only fill an
+  // empty transcript so an in-flight optimistic turn is never clobbered by a
+  // slower history fetch.
+  const hydrateSessionId = session?.sessionId
+  const hydrateStreamIndex = session?.streamIndex
+  useEffect(() => {
+    if (!hydrateSessionId || !hydrateStreamIndex) return
+    // Already replayed this session: skip refetching on later turns (which only
+    // bump the stream index). The flag is set after a successful fetch, not
+    // here, so a cancelled run (e.g. Strict Mode's double-invoke or a fast
+    // remount) never blocks the real fetch from completing.
+    if (hydratedSessionRef.current === hydrateSessionId) return
+
+    const params = new URLSearchParams({
+      projectId,
+      sessionId: hydrateSessionId,
+      streamIndex: String(hydrateStreamIndex),
+    })
+    let cancelled = false
+    fetch(`/api/agent?${params.toString()}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { messages?: ChatMessage[] } | null) => {
+        if (cancelled || !data) return
+        hydratedSessionRef.current = hydrateSessionId
+        const next = data.messages
+        if (next?.length)
+          setMessages((prev) => (prev.length === 0 ? next : prev))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [hydrateSessionId, hydrateStreamIndex, projectId])
 
   const createProject = useMutation(api.projects.create)
 
@@ -193,6 +244,28 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     : null
   const hasPending = Boolean(pending?.diff)
 
+  function appendMessage(role: ChatMessage["role"], content: string) {
+    const text = content.trim()
+    if (!text) return
+    setMessages((prev) => [
+      ...prev,
+      { id: `local-${role}-${Date.now()}-${prev.length}`, role, content: text },
+    ])
+  }
+
+  // Best-effort mirror of the eve cursor onto the project row for cross-device
+  // recovery. localStorage already holds it for this device, so a failure here
+  // never blocks the turn.
+  function persistCursor(cursor: SessionCursor) {
+    if (!project || !cursor.sessionId) return
+    void saveAgentSession({
+      projectId: project._id,
+      sessionId: cursor.sessionId,
+      continuationToken: cursor.continuationToken,
+      streamIndex: cursor.streamIndex,
+    }).catch(() => {})
+  }
+
   async function sendTurn(
     rawMessage: string,
     uploadedFiles: AgentUpload[] = []
@@ -203,13 +276,9 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     setBusy(true)
     setError(null)
     setDraft("")
+    appendMessage("user", message)
 
     try {
-      await recordMessage({
-        projectId: project._id,
-        role: "user",
-        content: message,
-      })
       const response = await fetch("/api/agent", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -226,18 +295,14 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       if (!response.ok) {
         throw new Error(result.error ?? "Robin could not finish the turn.")
       }
-      if (result.message) {
-        await recordMessage({
-          projectId: project._id,
-          role: "assistant",
-          content: result.message,
-        })
-      }
+      appendMessage("assistant", result.message ?? "")
       const committed = Boolean(result.committedDocument)
+      const cursor = cursorFromResult(result)
       setAgentState({
-        session: cursorFromResult(result),
+        session: cursor,
         pending: nextPending(pending, result, committed),
       })
+      persistCursor(cursor)
       if (committed && result.committedDocument) {
         await saveDocument({
           projectId: project._id,
@@ -261,16 +326,17 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       if (!result.committedDocument) {
         throw new Error("Robin did not return an approved design.md.")
       }
-      setAgentState({ session: cursorFromResult(result), pending: null })
+      const cursor = cursorFromResult(result)
+      setAgentState({ session: cursor, pending: null })
+      persistCursor(cursor)
       await saveDocument({
         projectId: project._id,
         document: result.committedDocument,
       })
-      await recordMessage({
-        projectId: project._id,
-        role: "assistant",
-        content: result.message ?? "Approved and saved design.md.",
-      })
+      appendMessage(
+        "assistant",
+        result.message ?? "Approved and saved design.md."
+      )
       setReviewOpen(false)
       setSelectedPath(DESIGN_PATH)
     } catch (cause) {
@@ -286,14 +352,10 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     setError(null)
     try {
       const result = await answerPendingDesign("deny")
-      setAgentState({ session: cursorFromResult(result), pending: null })
-      if (result.message) {
-        await recordMessage({
-          projectId: project._id,
-          role: "assistant",
-          content: result.message,
-        })
-      }
+      const cursor = cursorFromResult(result)
+      setAgentState({ session: cursor, pending: null })
+      persistCursor(cursor)
+      appendMessage("assistant", result.message ?? "")
       setReviewOpen(false)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not discard.")
@@ -527,7 +589,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
             busy={busy}
             draft={draft}
             error={error}
-            messages={messages ?? []}
+            messages={messages}
             onDraftChange={setDraft}
             onSubmit={sendTurn}
             onUploadFiles={handleUploadFiles}
@@ -537,7 +599,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         </section>
         <aside
           className={cn(
-            "flex min-h-0 min-w-0 flex-col lg:border-r",
+            "flex min-h-0 min-w-0 flex-col pt-4 lg:border-r",
             "max-lg:h-64 max-lg:shrink-0",
             view === "chat" && "hidden lg:flex"
           )}

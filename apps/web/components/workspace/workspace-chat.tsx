@@ -2,7 +2,6 @@
 
 import { useState, type ReactNode } from "react"
 import { Bot, Check, Copy } from "lucide-react"
-import type { Doc } from "@workspace/convex/dataModel"
 import { Action, Actions } from "@/components/ai-elements/actions"
 import {
   Conversation,
@@ -32,6 +31,15 @@ const STARTER_PROMPTS = [
   "Add accessibility and contrast rules",
 ]
 
+// The eve session is the source of record for the transcript. The browser
+// renders this lightweight shape, hydrated by replaying the session on load
+// and appended optimistically as turns complete.
+export type ChatMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+}
+
 export function WorkspaceChat({
   messages,
   busy,
@@ -43,7 +51,7 @@ export function WorkspaceChat({
   uploading,
   pending,
 }: {
-  messages: Doc<"messages">[]
+  messages: ChatMessage[]
   busy: boolean
   error: string | null
   draft: string
@@ -88,7 +96,7 @@ export function WorkspaceChat({
             </ConversationEmptyState>
           ) : (
             messages.map((message) => (
-              <Message from={message.role} key={message._id}>
+              <Message from={message.role} key={message.id}>
                 <MessageContent>
                   {message.role === "assistant" ? (
                     <MessageResponse>{message.content}</MessageResponse>

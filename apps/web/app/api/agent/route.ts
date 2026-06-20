@@ -24,7 +24,106 @@ type EveMessagePart =
   | { type: "text"; text: string }
   | { type: "file"; data: string; mediaType: string; filename: string }
 
+type TranscriptMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+}
+
 export const runtime = "nodejs"
+
+// Replays the durable eve session into the chat transcript. eve is the system
+// of record for the conversation, so cold loads rebuild history by streaming
+// the session from the start rather than reading a mirrored Convex table.
+export async function GET(request: Request) {
+  const { userId } = await auth()
+  if (!userId)
+    return NextResponse.json(
+      { error: "Sign in to use Robin." },
+      { status: 401 }
+    )
+
+  const url = new URL(request.url)
+  const projectId = url.searchParams.get("projectId") ?? ""
+  const sessionId = url.searchParams.get("sessionId") ?? ""
+  const streamIndex = Number(url.searchParams.get("streamIndex") ?? "")
+
+  if (!/^[a-z0-9_:-]{8,80}$/i.test(projectId))
+    return NextResponse.json({ error: "Invalid project id." }, { status: 400 })
+  if (!/^[a-z0-9:_-]{1,200}$/i.test(sessionId))
+    return NextResponse.json(
+      { error: "Invalid agent session." },
+      { status: 400 }
+    )
+  // streamIndex is the event count recorded at the last turn boundary. It
+  // bounds the replay so we never block waiting for a live event.
+  if (
+    !Number.isInteger(streamIndex) ||
+    streamIndex < 1 ||
+    streamIndex > 100_000
+  )
+    return NextResponse.json(
+      { error: "Invalid stream cursor." },
+      { status: 400 }
+    )
+
+  const host = process.env.EVE_AGENT_URL
+  const username = process.env.EVE_AGENT_USERNAME
+  const password = process.env.EVE_AGENT_PASSWORD
+  if (!host || !username || !password)
+    return NextResponse.json(
+      { error: "Robin agent is not configured." },
+      { status: 500 }
+    )
+
+  const client = new Client({ host, auth: { basic: { username, password } } })
+  const session = client.session({ sessionId, streamIndex: 0 })
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20_000)
+  try {
+    const messages: TranscriptMessage[] = []
+    let consumed = 0
+    for await (const event of session.stream({
+      startIndex: 0,
+      signal: controller.signal,
+    })) {
+      consumed++
+      if (event.type === "message.received") {
+        const content = event.data.message.trim()
+        if (content)
+          messages.push({ id: `eve-${consumed}`, role: "user", content })
+      } else if (
+        event.type === "message.completed" &&
+        event.data.finishReason !== "tool-calls" &&
+        event.data.message
+      ) {
+        const content = event.data.message.trim()
+        if (content)
+          messages.push({ id: `eve-${consumed}`, role: "assistant", content })
+      }
+      if (event.type === "session.completed" || event.type === "session.failed")
+        break
+      if (consumed >= streamIndex) break
+    }
+    return NextResponse.json({ messages })
+  } catch (cause) {
+    // A pruned or expired session (eve sessions are durable, not permanent) has
+    // no transcript to replay. Treat it as empty history so the chat still
+    // opens and the user can start a fresh turn.
+    if (
+      cause instanceof ClientError &&
+      (cause.status === 404 || cause.status === 410)
+    )
+      return NextResponse.json({ messages: [] })
+    return NextResponse.json(
+      { error: "Robin could not load the conversation history." },
+      { status: 502 }
+    )
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 
 export async function POST(request: Request) {
   const { userId } = await auth()
