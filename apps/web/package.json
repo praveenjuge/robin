@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clerk/nextjs": "^7.5.6",
+    "@clerk/nextjs": "^7.5.7",
     "@pierre/trees": "^1.0.0-beta.4",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",
@@ -23,10 +23,10 @@
     "ai": "^6.0.208",
     "convex": "^1.41.0",
     "lucide-react": "^1.21.0",
-    "next": "16.2.6",
+    "next": "16.2.9",
     "next-themes": "^0.4.6",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
     "streamdown": "^2.5.0",
     "use-stick-to-bottom": "^1.1.6"
   },
