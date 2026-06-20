@@ -1,5 +1,7 @@
 import { auth } from "@clerk/nextjs/server"
 import { NextResponse } from "next/server"
+import { Client, ClientError } from "eve/client"
+import type { HandleMessageStreamEvent } from "eve/client"
 
 type InputResponse = { requestId: string; optionId: "approve" | "deny" }
 type UploadManifest = {
@@ -18,9 +20,6 @@ type AgentBody = {
   inputResponses?: InputResponse[]
   uploads?: UploadManifest[]
 }
-type AgentEvent = { type: string; data?: unknown; index?: number }
-type InputRequestedData = { requests?: unknown[] }
-type InputRequest = { requestId: string; prompt?: string }
 type EveMessagePart =
   | { type: "text"; text: string }
   | { type: "file"; data: string; mediaType: string; filename: string }
@@ -51,7 +50,6 @@ export async function POST(request: Request) {
     )
   }
 
-  const isFollowUp = Boolean(body.sessionId && body.continuationToken)
   let uploads: EveMessagePart[] = []
   try {
     uploads =
@@ -69,89 +67,75 @@ export async function POST(request: Request) {
       { status: 400 }
     )
   }
-  const message = buildMessage(body.message, uploads)
-  const endpoint = isFollowUp
-    ? `${host}/eve/v1/session/${encodeURIComponent(body.sessionId!)}`
-    : `${host}/eve/v1/session`
-  const payload = {
-    ...(message ? { message } : {}),
-    ...(body.continuationToken
-      ? { continuationToken: body.continuationToken }
-      : {}),
-    ...(body.inputResponses ? { inputResponses: body.inputResponses } : {}),
-    clientContext: {
-      projectId: body.projectId,
-      clerkUserId: userId,
-      uploads: body.uploads?.map(({ id, name, contentType, size }) => ({
-        id,
-        name,
-        contentType,
-        size,
-      })),
-    },
-  }
-  const started = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  })
-  const startJson = await started.json().catch(() => ({}))
-  if (!started.ok) {
-    return NextResponse.json(
-      { error: startJson.error ?? "Robin agent rejected the turn." },
-      { status: started.status }
-    )
-  }
 
-  const sessionId = startJson.sessionId ?? body.sessionId
-  const stream = await fetch(
-    `${host}/eve/v1/session/${encodeURIComponent(sessionId)}/stream?startIndex=${body.streamIndex ?? 0}`,
-    {
-      headers: {
-        authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`,
-      },
-    }
+  // The eve client owns the session lifecycle: it picks the right endpoint
+  // (new session vs. follow-up), streams the NDJSON turn, tracks the
+  // continuation token + stream cursor, and reconnects on transient drops.
+  const client = new Client({
+    host,
+    auth: { basic: { username, password } },
+  })
+  const session = client.session({
+    sessionId: body.sessionId,
+    continuationToken: body.continuationToken,
+    streamIndex: body.streamIndex ?? 0,
+  })
+
+  const message = buildMessage(body.message, uploads)
+  const uploadsContext = body.uploads?.map(
+    ({ id, name, contentType, size }) => ({ id, name, contentType, size })
   )
-  const events = stream.ok ? await readNdjson(stream) : []
-  if (!stream.ok) {
+  try {
+    const response = await session.send({
+      ...(message ? { message } : {}),
+      ...(body.inputResponses ? { inputResponses: body.inputResponses } : {}),
+      clientContext: {
+        projectId: body.projectId ?? "",
+        clerkUserId: userId,
+        ...(uploadsContext ? { uploads: uploadsContext } : {}),
+      },
+    })
+    const result = await response.result()
+
+    if (result.status === "failed") {
+      return NextResponse.json(
+        { error: agentFailureMessage(result.events) },
+        { status: 502 }
+      )
+    }
+
+    const proposed = findToolOutput(result.events, "propose_design_changes")
+    const committed = findToolOutput(result.events, "commit_design")
+    const { sessionId, continuationToken, streamIndex } = session.state
+
+    return NextResponse.json({
+      message: result.message,
+      sessionId,
+      continuationToken,
+      streamIndex,
+      pendingRequests: result.inputRequests.map((request) => ({
+        requestId: request.requestId,
+      })),
+      diff: stringValue(proposed?.diff),
+      proposedDocument: stringValue(proposed?.proposedDocument),
+      committedDocument: stringValue(committed?.document),
+    })
+  } catch (cause) {
+    if (cause instanceof ClientError) {
+      const message = clientErrorMessage(cause)
+      return NextResponse.json(
+        { error: message },
+        {
+          status:
+            cause.status >= 400 && cause.status < 600 ? cause.status : 502,
+        }
+      )
+    }
     return NextResponse.json(
       { error: "Robin could not read the agent response." },
       { status: 502 }
     )
   }
-  const failed = [...events]
-    .reverse()
-    .find(
-      (event) => event.type === "turn.failed" || event.type === "session.failed"
-    )
-  if (failed) {
-    return NextResponse.json(
-      { error: agentFailureMessage(failed) },
-      { status: 502 }
-    )
-  }
-  const pendingData = lastEventData(events, "input.requested")
-  const pendingRequests = toInputRequestedData(pendingData)
-    ?.requests?.filter(isInputRequest)
-    .map((request) => ({
-      requestId: request.requestId,
-    }))
-  const proposed = findToolOutput(events, "propose_design_changes")
-  const committed = findToolOutput(events, "commit_design")
-
-  return NextResponse.json({
-    message: finalMessage(events),
-    sessionId,
-    continuationToken: startJson.continuationToken ?? body.continuationToken,
-    streamIndex: nextStreamIndex(events, body.streamIndex ?? 0),
-    pendingRequests,
-    diff: stringValue(proposed?.diff),
-    proposedDocument: stringValue(proposed?.proposedDocument),
-    committedDocument: stringValue(committed?.document),
-  })
 }
 
 function validateBody(value: unknown) {
@@ -222,10 +206,15 @@ function validateUpload(upload: unknown) {
   )
 }
 
-function agentFailureMessage(event: AgentEvent) {
+function agentFailureMessage(events: HandleMessageStreamEvent[]) {
+  const failed = [...events]
+    .reverse()
+    .find(
+      (event) => event.type === "turn.failed" || event.type === "session.failed"
+    )
   const message =
-    event.data && typeof event.data === "object"
-      ? String((event.data as { message?: unknown }).message ?? "")
+    failed && "data" in failed && failed.data && typeof failed.data === "object"
+      ? String((failed.data as { message?: unknown }).message ?? "")
       : ""
   if (/rate.?limit/i.test(message)) {
     return "Robin is temporarily rate-limited. Try this turn again shortly."
@@ -233,111 +222,44 @@ function agentFailureMessage(event: AgentEvent) {
   return "Robin could not finish this turn. Please try again."
 }
 
-async function readNdjson(response: Response) {
-  const reader = response.body?.getReader()
-  if (!reader) return []
-  const decoder = new TextDecoder()
-  const events: AgentEvent[] = []
-  let buffer = ""
-
-  while (events.length < 10_000) {
-    const { done, value } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done })
-    const lines = buffer.split("\n")
-    buffer = lines.pop() ?? ""
-    for (const line of lines) {
-      if (!line.trim()) continue
-      const parsed = parseAgentEvent(line)
-      if (!parsed) continue
-      events.push(parsed)
-      if (/^session\.(waiting|completed|failed)$/.test(parsed.type)) {
-        await reader.cancel()
-        return events
-      }
-    }
-    if (done) break
+function clientErrorMessage(error: ClientError) {
+  const parsed = safeJson(error.body)
+  if (parsed && typeof parsed === "object" && "error" in parsed) {
+    const value = (parsed as { error?: unknown }).error
+    if (typeof value === "string") return value
   }
-  return events
+  return "Robin agent rejected the turn."
 }
 
-function parseAgentEvent(line: string): AgentEvent | null {
-  const value: unknown = JSON.parse(line)
-  if (!value || typeof value !== "object") return null
-  const event = value as { type?: unknown; data?: unknown; index?: unknown }
-  if (typeof event.type !== "string") return null
-  return {
-    type: event.type,
-    data: event.data,
-    index: Number.isInteger(event.index) ? event.index : undefined,
-  } as AgentEvent
-}
-
-function finalMessage(events: AgentEvent[]) {
-  return events
-    .filter((event) => event.type === "message.completed")
-    .map((event) => toMessageData(event.data)?.message)
-    .filter((message): message is string => typeof message === "string")
-    .at(-1)
-}
-
-function lastEventData(events: AgentEvent[], type: string) {
-  return [...events].reverse().find((event) => event.type === type)?.data
+function safeJson(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
 }
 
 function findToolOutput(
-  events: AgentEvent[],
+  events: HandleMessageStreamEvent[],
   toolName: string
 ): Record<string, unknown> | null {
   for (const event of events) {
     if (event.type !== "action.result") continue
-    const value = findObject(event, (item) =>
-      Boolean(
-        (item.toolName === toolName ||
-          item.name === toolName ||
-          item.actionName === toolName) &&
-        (item.output || item.result)
-      )
-    )
-    const output = value ? (value.output ?? value.result) : null
-    if (output && typeof output === "object") {
-      return output as Record<string, unknown>
+    const result = event.data.result
+    if (
+      result.kind === "tool-result" &&
+      result.toolName === toolName &&
+      result.output &&
+      typeof result.output === "object"
+    ) {
+      return result.output as Record<string, unknown>
     }
   }
   return null
 }
 
-function isInputRequest(value: unknown): value is InputRequest {
-  return (
-    Boolean(value) &&
-    typeof value === "object" &&
-    typeof (value as InputRequest).requestId === "string"
-  )
-}
-
-function toInputRequestedData(value: unknown): InputRequestedData | null {
-  if (!value || typeof value !== "object") return null
-  const requests = (value as InputRequestedData).requests
-  return requests === undefined || Array.isArray(requests)
-    ? { requests }
-    : null
-}
-
-function toMessageData(value: unknown): { message?: string } | null {
-  if (!value || typeof value !== "object") return null
-  return value as { message?: string }
-}
-
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : undefined
-}
-
-function nextStreamIndex(events: AgentEvent[], fallbackStart: number) {
-  const indexed = events
-    .map((event) => event.index)
-    .filter((index): index is number => Number.isInteger(index))
-  return indexed.length > 0
-    ? Math.max(...indexed) + 1
-    : fallbackStart + events.length
 }
 
 function buildMessage(message = "", uploads: EveMessagePart[]) {
@@ -398,21 +320,4 @@ function isTrustedConvexStorageUrl(value: string) {
   } catch {
     return false
   }
-}
-
-function findObject(
-  value: unknown,
-  match: (item: Record<string, unknown>) => boolean
-): Record<string, unknown> | null {
-  if (!value || typeof value !== "object") return null
-  if (match(value as Record<string, unknown>)) {
-    return value as Record<string, unknown>
-  }
-  for (const child of Object.values(value)) {
-    const found = Array.isArray(child)
-      ? child.map((item) => findObject(item, match)).find(Boolean)
-      : findObject(child, match)
-    if (found) return found
-  }
-  return null
 }

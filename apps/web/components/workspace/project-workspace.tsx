@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useMutation, useQuery } from "convex/react"
@@ -65,6 +65,73 @@ type AgentUpload = {
   url: string
 }
 
+// The eve agent owns the durable session; the browser only holds the
+// serializable cursor it needs to resume it, plus the in-flight review state
+// for the current proposal. Both are runtime concerns, so they live in local
+// component state (mirrored to localStorage for reloads) rather than Convex.
+type SessionCursor = {
+  sessionId?: string
+  continuationToken?: string
+  streamIndex?: number
+}
+type PendingReview = {
+  diff: string
+  proposedDocument: string
+  requests: { requestId: string }[]
+}
+type AgentSnapshot = {
+  session: SessionCursor | null
+  pending: PendingReview | null
+}
+
+const EMPTY_SNAPSHOT: AgentSnapshot = { session: null, pending: null }
+
+function agentStorageKey(projectId: string) {
+  return `robin:agent:${projectId}`
+}
+
+function loadSnapshot(projectId: string): AgentSnapshot {
+  if (typeof window === "undefined") return EMPTY_SNAPSHOT
+  try {
+    const raw = window.localStorage.getItem(agentStorageKey(projectId))
+    if (!raw) return EMPTY_SNAPSHOT
+    const parsed = JSON.parse(raw) as Partial<AgentSnapshot>
+    return {
+      session: parsed.session ?? null,
+      pending: parsed.pending ?? null,
+    }
+  } catch {
+    return EMPTY_SNAPSHOT
+  }
+}
+
+function cursorFromResult(result: AgentResult): SessionCursor {
+  return {
+    sessionId: result.sessionId,
+    continuationToken: result.continuationToken,
+    streamIndex: result.streamIndex,
+  }
+}
+
+// Mirrors the previous Convex merge semantics: a commit clears the proposal, a
+// new proposal replaces it, and any other turn leaves the current proposal
+// untouched (the agent may still be parked waiting on its approval).
+function nextPending(
+  current: PendingReview | null,
+  result: AgentResult,
+  committed: boolean
+): PendingReview | null {
+  if (committed) return null
+  if (result.diff && result.proposedDocument) {
+    return {
+      diff: result.diff,
+      proposedDocument: result.proposedDocument,
+      requests: result.pendingRequests ?? [],
+    }
+  }
+  return current
+}
+
 export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const router = useRouter()
   const id = projectId as Id<"projects">
@@ -75,7 +142,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const uploads = useQuery(api.uploads.list, { projectId: id })
 
   const recordMessage = useMutation(api.messages.record)
-  const saveAgentState = useMutation(api.projects.saveAgentState)
+  const saveDocument = useMutation(api.projects.saveDocument)
   const renameProject = useMutation(api.projects.rename)
   const removeProject = useMutation(api.projects.remove)
   const generateUploadUrl = useMutation(api.uploads.generateUploadUrl)
@@ -92,6 +159,20 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const [renameOpen, setRenameOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+
+  const [agentState, setAgentState] = useState<AgentSnapshot>(() =>
+    loadSnapshot(projectId)
+  )
+  const session = agentState.session
+  const pending = agentState.pending
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(
+      agentStorageKey(projectId),
+      JSON.stringify(agentState)
+    )
+  }, [projectId, agentState])
 
   const createProject = useMutation(api.projects.create)
 
@@ -110,9 +191,12 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const selectedUpload = selectedPath
     ? (uploadByPath.get(selectedPath) ?? null)
     : null
-  const hasPending = Boolean(project?.pendingDiff)
+  const hasPending = Boolean(pending?.diff)
 
-  async function sendTurn(rawMessage: string, uploadedFiles: AgentUpload[] = []) {
+  async function sendTurn(
+    rawMessage: string,
+    uploadedFiles: AgentUpload[] = []
+  ) {
     if (!project || busy) return
     const message = rawMessage.trim()
     if (!message && uploadedFiles.length === 0) return
@@ -132,9 +216,9 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         body: JSON.stringify({
           projectId: project._id,
           message,
-          sessionId: project.eveSessionId,
-          continuationToken: project.eveContinuationToken,
-          streamIndex: project.eveStreamIndex,
+          sessionId: session?.sessionId,
+          continuationToken: session?.continuationToken,
+          streamIndex: session?.streamIndex,
           uploads: uploadedFiles,
         }),
       })
@@ -150,17 +234,16 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         })
       }
       const committed = Boolean(result.committedDocument)
-      await saveAgentState({
-        projectId: project._id,
-        eveSessionId: result.sessionId,
-        eveContinuationToken: result.continuationToken,
-        eveStreamIndex: result.streamIndex,
-        pendingRequests: result.pendingRequests ?? (committed ? [] : undefined),
-        pendingDiff: result.diff ?? (committed ? "" : undefined),
-        proposedDocument:
-          result.proposedDocument ?? (committed ? "" : undefined),
-        document: result.committedDocument,
+      setAgentState({
+        session: cursorFromResult(result),
+        pending: nextPending(pending, result, committed),
       })
+      if (committed && result.committedDocument) {
+        await saveDocument({
+          projectId: project._id,
+          document: result.committedDocument,
+        })
+      }
       if (result.diff) setSelectedPath(DESIGN_PATH)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Something went wrong.")
@@ -178,14 +261,9 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       if (!result.committedDocument) {
         throw new Error("Robin did not return an approved design.md.")
       }
-      await saveAgentState({
+      setAgentState({ session: cursorFromResult(result), pending: null })
+      await saveDocument({
         projectId: project._id,
-        eveSessionId: result.sessionId,
-        eveContinuationToken: result.continuationToken,
-        eveStreamIndex: result.streamIndex,
-        pendingRequests: [],
-        pendingDiff: "",
-        proposedDocument: "",
         document: result.committedDocument,
       })
       await recordMessage({
@@ -208,15 +286,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     setError(null)
     try {
       const result = await answerPendingDesign("deny")
-      await saveAgentState({
-        projectId: project._id,
-        eveSessionId: result.sessionId,
-        eveContinuationToken: result.continuationToken,
-        eveStreamIndex: result.streamIndex,
-        pendingDiff: "",
-        proposedDocument: "",
-        pendingRequests: [],
-      })
+      setAgentState({ session: cursorFromResult(result), pending: null })
       if (result.message) {
         await recordMessage({
           projectId: project._id,
@@ -234,9 +304,10 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
 
   async function answerPendingDesign(optionId: "approve" | "deny") {
     if (
-      !project?.eveSessionId ||
-      !project.eveContinuationToken ||
-      !project.pendingRequests?.length
+      !project ||
+      !session?.sessionId ||
+      !session.continuationToken ||
+      !pending?.requests.length
     ) {
       throw new Error("Robin is not waiting for a design decision.")
     }
@@ -245,10 +316,10 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         projectId: project._id,
-        sessionId: project.eveSessionId,
-        continuationToken: project.eveContinuationToken,
-        streamIndex: project.eveStreamIndex,
-        inputResponses: project.pendingRequests.map((request) => ({
+        sessionId: session.sessionId,
+        continuationToken: session.continuationToken,
+        streamIndex: session.streamIndex,
+        inputResponses: pending.requests.map((request) => ({
           requestId: request.requestId,
           optionId,
         })),
@@ -495,7 +566,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
 
       <ReviewChangesDialog
         busy={busy}
-        diff={project.pendingDiff ?? ""}
+        diff={pending?.diff ?? ""}
         onApprove={approvePendingDesign}
         onOpenChange={setReviewOpen}
         onReject={rejectPendingDesign}

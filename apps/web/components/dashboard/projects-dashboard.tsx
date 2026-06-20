@@ -164,8 +164,6 @@ function ProjectCard({
   onRename: () => void
   onDelete: () => void
 }) {
-  const hasPending = Boolean(project.pendingDiff)
-
   return (
     <div className="group relative flex flex-col gap-3 rounded-[min(var(--radius-4xl),24px)] border bg-card p-5 text-card-foreground shadow-sm ring-1 ring-foreground/5 transition-shadow focus-within:ring-ring/40 hover:shadow-md">
       <div className="flex items-start justify-between gap-2">
@@ -212,9 +210,7 @@ function ProjectCard({
       </div>
 
       <div className="flex items-center gap-2">
-        {hasPending ? (
-          <Badge variant="secondary">Changes pending</Badge>
-        ) : project.latestCommit ? (
+        {project.latestCommit ? (
           <Badge variant="outline">Committed</Badge>
         ) : (
           <Badge variant="ghost">Draft</Badge>

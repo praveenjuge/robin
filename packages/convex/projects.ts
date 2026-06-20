@@ -1,10 +1,5 @@
 import { ConvexError, v } from "convex/values"
-import {
-  internalMutation,
-  internalQuery,
-  mutation,
-  query,
-} from "./_generated/server"
+import { mutation, query } from "./_generated/server"
 import type { Id } from "./_generated/dataModel"
 
 const starterDoc = `---
@@ -43,12 +38,6 @@ const projectFields = {
   ownerId: v.string(),
   name: v.string(),
   document: v.string(),
-  pendingDiff: v.optional(v.string()),
-  proposedDocument: v.optional(v.string()),
-  pendingRequests: v.optional(v.array(v.object({ requestId: v.string() }))),
-  eveSessionId: v.optional(v.string()),
-  eveContinuationToken: v.optional(v.string()),
-  eveStreamIndex: v.optional(v.number()),
   latestCommit: v.optional(v.string()),
   updatedAt: v.number(),
 }
@@ -157,92 +146,28 @@ export const remove = mutation({
   },
 })
 
-export const saveAgentState = mutation({
+// Persists an approved design.md back to the project record. The eve agent
+// owns the durable session and the R2 commit; Convex only mirrors the latest
+// committed document so the workspace can render and download it.
+export const saveDocument = mutation({
   args: {
     projectId: v.id("projects"),
-    eveSessionId: v.optional(v.string()),
-    eveContinuationToken: v.optional(v.string()),
-    eveStreamIndex: v.optional(v.number()),
-    pendingRequests: v.optional(v.array(v.object({ requestId: v.string() }))),
-    pendingDiff: v.optional(v.string()),
-    proposedDocument: v.optional(v.string()),
-    document: v.optional(v.string()),
+    document: v.string(),
+    commitId: v.optional(v.string()),
   },
   returns: v.null(),
-  async handler(ctx, args) {
+  async handler(ctx, { projectId, document, commitId }) {
     const identity = await ctx.auth.getUserIdentity()
     if (!identity) throw new ConvexError("Not authenticated")
-    const project = await ctx.db.get(args.projectId)
+    const project = await ctx.db.get(projectId)
     if (!project || project.ownerId !== identity.subject) {
       throw new ConvexError("Project not found")
     }
-    const patch: {
-      eveSessionId?: string
-      eveContinuationToken?: string
-      eveStreamIndex?: number
-      pendingRequests?: { requestId: string }[]
-      pendingDiff?: string
-      proposedDocument?: string
-      document?: string
-      latestCommit?: string
-      updatedAt: number
-    } = { updatedAt: Date.now() }
-    if (args.eveSessionId !== undefined) patch.eveSessionId = args.eveSessionId
-    if (args.eveContinuationToken !== undefined) {
-      patch.eveContinuationToken = args.eveContinuationToken
-    }
-    if (args.eveStreamIndex !== undefined)
-      patch.eveStreamIndex = args.eveStreamIndex
-    if (args.pendingRequests !== undefined)
-      patch.pendingRequests = args.pendingRequests
-    if (args.pendingDiff !== undefined) patch.pendingDiff = args.pendingDiff
-    if (args.proposedDocument !== undefined)
-      patch.proposedDocument = args.proposedDocument
-    if (args.document !== undefined) {
-      patch.document = args.document
-      patch.latestCommit = `r2-${Date.now().toString(36)}`
-    }
-    await ctx.db.patch(args.projectId as Id<"projects">, patch)
-    return null
-  },
-})
-
-export const getPendingApproval = internalQuery({
-  args: { ownerId: v.string(), projectId: v.id("projects") },
-  returns: v.union(
-    v.object({
-      proposedDocument: v.string(),
-    }),
-    v.null()
-  ),
-  async handler(ctx, { ownerId, projectId }) {
-    const project = await ctx.db.get(projectId)
-    if (!project || project.ownerId !== ownerId || !project.proposedDocument) {
-      return null
-    }
-    return { proposedDocument: project.proposedDocument }
-  },
-})
-
-export const applyApprovedDesign = internalMutation({
-  args: {
-    commitId: v.string(),
-    document: v.string(),
-    ownerId: v.string(),
-    projectId: v.id("projects"),
-  },
-  returns: v.null(),
-  async handler(ctx, { commitId, document, ownerId, projectId }) {
-    const project = await ctx.db.get(projectId)
-    if (!project || project.ownerId !== ownerId) {
-      throw new ConvexError("Project not found")
-    }
+    if (document.length > 80_000)
+      throw new ConvexError("Document is too large.")
     await ctx.db.patch(projectId as Id<"projects">, {
       document,
-      latestCommit: commitId,
-      pendingDiff: "",
-      pendingRequests: [],
-      proposedDocument: "",
+      latestCommit: commitId ?? `r2-${Date.now().toString(36)}`,
       updatedAt: Date.now(),
     })
     return null

@@ -22,5 +22,5 @@ export default async function ProjectPage({
   }
 
   const { projectId } = await params
-  return <ProjectWorkspace projectId={projectId} />
+  return <ProjectWorkspace key={projectId} projectId={projectId} />
 }

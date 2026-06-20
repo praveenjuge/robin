@@ -43,6 +43,7 @@
         "@workspace/ui": "workspace:*",
         "ai": "^6.0.208",
         "convex": "^1.41.0",
+        "eve": "^0.11.8",
         "lucide-react": "^1.21.0",
         "next": "16.2.9",
         "next-themes": "^0.4.6",
@@ -66,7 +67,6 @@
       "name": "@workspace/convex",
       "version": "0.0.0",
       "dependencies": {
-        "@aws-sdk/client-s3": "^3.1073.0",
         "convex": "^1.41.0",
       },
       "devDependencies": {
