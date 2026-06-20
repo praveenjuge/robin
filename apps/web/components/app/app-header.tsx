@@ -20,8 +20,8 @@ export function AppHeader({
         className="flex shrink-0 items-center gap-2 rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
         href="/"
       >
-        <span className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground">
-          <Sparkles className="size-4" />
+        <span className="grid size-6 place-items-center rounded-lg bg-primary text-primary-foreground">
+          <Sparkles className="size-3 fill-current" />
         </span>
         <span className="hidden text-sm font-medium sm:inline">Robin</span>
       </Link>
