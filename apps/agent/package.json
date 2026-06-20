@@ -20,7 +20,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "24.x",
+    "@types/node": "26.x",
     "@typescript/native-preview": "7.0.0-dev.20260523.1",
     "microsandbox": "^0.5.7"
   },
