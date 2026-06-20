@@ -45,11 +45,6 @@ const projectFields = {
   eveSessionId: v.optional(v.string()),
   eveContinuationToken: v.optional(v.string()),
   eveStreamIndex: v.optional(v.number()),
-  // Deprecated: legacy in-flight review state, retained so query return
-  // validators accept rows that still carry it. See schema.ts.
-  pendingRequests: v.optional(v.array(v.object({ requestId: v.string() }))),
-  pendingDiff: v.optional(v.string()),
-  proposedDocument: v.optional(v.string()),
 }
 
 const projectValidator = v.object(projectFields)

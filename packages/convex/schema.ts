@@ -15,13 +15,6 @@ export default defineSchema({
     eveSessionId: v.optional(v.string()),
     eveContinuationToken: v.optional(v.string()),
     eveStreamIndex: v.optional(v.number()),
-    // Deprecated: legacy in-flight review state. The browser now holds the
-    // pending proposal. Retained as optional so the schema validates against
-    // historical rows that still carry these fields; remove only after a
-    // migration strips them from every existing document.
-    pendingRequests: v.optional(v.array(v.object({ requestId: v.string() }))),
-    pendingDiff: v.optional(v.string()),
-    proposedDocument: v.optional(v.string()),
   }).index("by_owner", ["ownerId"]),
   uploads: defineTable({
     projectId: v.id("projects"),
