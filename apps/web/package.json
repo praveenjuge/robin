@@ -20,7 +20,7 @@
     "@streamdown/mermaid": "^1.0.2",
     "@workspace/convex": "workspace:*",
     "@workspace/ui": "workspace:*",
-    "ai": "^6.0.208",
+    "ai": "^7.0.0-canary.176",
     "convex": "^1.41.0",
     "lucide-react": "^1.21.0",
     "next": "16.2.6",

@@ -15,7 +15,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1072.0",
     "@vercel/connect": "0.2.2",
-    "ai": "7.0.0-beta.178",
+    "ai": "7.0.0-canary.176",
     "eve": "^0.11.7",
     "zod": "4.4.3"
   },
@@ -25,10 +25,10 @@
     "microsandbox": "^0.5.7"
   },
   "overrides": {
-    "ai": "7.0.0-beta.178"
+    "ai": "7.0.0-canary.176"
   },
   "resolutions": {
-    "ai": "7.0.0-beta.178"
+    "ai": "7.0.0-canary.176"
   },
   "engines": {
     "node": "24.x"
