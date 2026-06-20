@@ -28,8 +28,8 @@
     "convex": "^1.41.0"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^26",
     "@workspace/typescript-config": "workspace:*",
-    "typescript": "^5"
+    "typescript": "^6"
   }
 }

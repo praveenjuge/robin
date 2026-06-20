@@ -9,6 +9,10 @@
     "strict": true,
     "skipLibCheck": true,
 
+    /* TypeScript 6 no longer auto-includes @types/node under "Bundler"
+     * module resolution, so declare it explicitly for process.env etc. */
+    "types": ["node"],
+
     /* These compiler options are required by Convex */
     "target": "ESNext",
     "lib": ["ES2021", "dom", "ESNext.Array"],
