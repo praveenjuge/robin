@@ -8,21 +8,23 @@
  * @module
  */
 
-import type * as messages from "../messages.js"
-import type * as projects from "../projects.js"
-import type * as r2 from "../r2.js"
+import type * as messages from "../messages.js";
+import type * as projects from "../projects.js";
+import type * as r2 from "../r2.js";
+import type * as uploads from "../uploads.js";
 
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
-} from "convex/server"
+} from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  messages: typeof messages
-  projects: typeof projects
-  r2: typeof r2
-}>
+  messages: typeof messages;
+  projects: typeof projects;
+  r2: typeof r2;
+  uploads: typeof uploads;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.
@@ -35,7 +37,7 @@ declare const fullApi: ApiFromModules<{
 export declare const api: FilterApi<
   typeof fullApi,
   FunctionReference<any, "public">
->
+>;
 
 /**
  * A utility for referencing Convex functions in your app's internal API.
@@ -48,6 +50,6 @@ export declare const api: FilterApi<
 export declare const internal: FilterApi<
   typeof fullApi,
   FunctionReference<any, "internal">
->
+>;
 
-export declare const components: {}
+export declare const components: {};

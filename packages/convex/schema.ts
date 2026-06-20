@@ -24,4 +24,13 @@ export default defineSchema({
     content: v.string(),
     createdAt: v.number(),
   }).index("by_project", ["projectId"]),
+  uploads: defineTable({
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    name: v.string(),
+    storageId: v.id("_storage"),
+    contentType: v.string(),
+    size: v.number(),
+    createdAt: v.number(),
+  }).index("by_project", ["projectId"]),
 })

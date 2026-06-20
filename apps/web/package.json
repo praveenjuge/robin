@@ -13,11 +13,12 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.6",
-    "@aws-sdk/client-s3": "^3.1072.0",
+    "@pierre/trees": "^1.0.0-beta.4",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "@streamdown/mermaid": "^1.0.2",
+    "@workspace/convex": "workspace:*",
     "@workspace/ui": "workspace:*",
     "ai": "^6.0.208",
     "convex": "^1.41.0",

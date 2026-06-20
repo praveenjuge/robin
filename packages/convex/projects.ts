@@ -104,6 +104,59 @@ export const create = mutation({
   },
 })
 
+export const rename = mutation({
+  args: { projectId: v.id("projects"), name: v.string() },
+  returns: v.null(),
+  async handler(ctx, { projectId, name }) {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new ConvexError("Not authenticated")
+    const project = await ctx.db.get(projectId)
+    if (!project || project.ownerId !== identity.subject) {
+      throw new ConvexError("Project not found")
+    }
+    const cleanName = name.trim()
+    if (cleanName.length < 2 || cleanName.length > 80) {
+      throw new ConvexError("Project names must be 2 to 80 characters.")
+    }
+    if (cleanName === project.name) return null
+    await ctx.db.patch(projectId as Id<"projects">, {
+      name: cleanName,
+      updatedAt: Date.now(),
+    })
+    return null
+  },
+})
+
+export const remove = mutation({
+  args: { projectId: v.id("projects") },
+  returns: v.null(),
+  async handler(ctx, { projectId }) {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new ConvexError("Not authenticated")
+    const project = await ctx.db.get(projectId)
+    if (!project || project.ownerId !== identity.subject) {
+      throw new ConvexError("Project not found")
+    }
+    const messages = await ctx.db
+      .query("messages")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect()
+    await Promise.all(messages.map((message) => ctx.db.delete(message._id)))
+    const uploads = await ctx.db
+      .query("uploads")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect()
+    await Promise.all(
+      uploads.map(async (upload) => {
+        await ctx.storage.delete(upload.storageId)
+        await ctx.db.delete(upload._id)
+      })
+    )
+    await ctx.db.delete(projectId as Id<"projects">)
+    return null
+  },
+})
+
 export const saveAgentState = mutation({
   args: {
     projectId: v.id("projects"),

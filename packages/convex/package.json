@@ -1,0 +1,35 @@
+{
+  "name": "@workspace/convex",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "convex dev",
+    "setup": "convex dev --until-success",
+    "deploy": "convex deploy",
+    "format": "prettier --write \"*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    "./api": {
+      "types": "./_generated/api.d.ts",
+      "default": "./_generated/api.js"
+    },
+    "./dataModel": {
+      "types": "./_generated/dataModel.d.ts"
+    },
+    "./server": {
+      "types": "./_generated/server.d.ts",
+      "default": "./_generated/server.js"
+    }
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1072.0",
+    "convex": "^1.41.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@workspace/typescript-config": "workspace:*",
+    "typescript": "^5"
+  }
+}
