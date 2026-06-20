@@ -32,7 +32,7 @@ export const create = mutation({
     contentType: v.string(),
     size: v.number(),
   },
-  returns: v.id("uploads"),
+  returns: uploadView,
   async handler(ctx, args) {
     const identity = await ctx.auth.getUserIdentity()
     if (!identity) throw new ConvexError("Not authenticated")
@@ -44,7 +44,10 @@ export const create = mutation({
     if (args.size > 25_000_000) {
       throw new ConvexError("Files must be 25 MB or smaller.")
     }
-    return await ctx.db.insert("uploads", {
+    if (!isAllowedContentType(args.contentType)) {
+      throw new ConvexError("Only images, text, Markdown, and PDFs can be uploaded.")
+    }
+    const uploadId = await ctx.db.insert("uploads", {
       projectId: args.projectId,
       ownerId: identity.subject,
       name,
@@ -53,6 +56,9 @@ export const create = mutation({
       size: args.size,
       createdAt: Date.now(),
     })
+    const upload = await ctx.db.get(uploadId)
+    if (!upload) throw new ConvexError("Upload failed.")
+    return { ...upload, url: await ctx.storage.getUrl(upload.storageId) }
   },
 })
 
@@ -77,6 +83,12 @@ export const list = query({
     )
   },
 })
+
+function isAllowedContentType(contentType: string) {
+  return /^(image\/(png|jpe?g|webp|gif)|text\/plain|text\/markdown|application\/pdf)(;|$)/i.test(
+    contentType
+  )
+}
 
 export const remove = mutation({
   args: { uploadId: v.id("uploads") },

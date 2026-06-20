@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { useAction, useMutation, useQuery } from "convex/react"
+import { useMutation, useQuery } from "convex/react"
 import {
   ChevronsUpDown,
   Download,
@@ -57,6 +57,13 @@ type AgentResult = {
   proposedDocument?: string
   committedDocument?: string
 }
+type AgentUpload = {
+  id: string
+  name: string
+  contentType: string
+  size: number
+  url: string
+}
 
 export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const router = useRouter()
@@ -74,7 +81,6 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const generateUploadUrl = useMutation(api.uploads.generateUploadUrl)
   const createUpload = useMutation(api.uploads.create)
   const removeUpload = useMutation(api.uploads.remove)
-  const approveDesign = useAction(api.r2.approveDesign)
 
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
@@ -106,10 +112,10 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     : null
   const hasPending = Boolean(project?.pendingDiff)
 
-  async function sendTurn(rawMessage: string) {
+  async function sendTurn(rawMessage: string, uploadedFiles: AgentUpload[] = []) {
     if (!project || busy) return
     const message = rawMessage.trim()
-    if (!message) return
+    if (!message && uploadedFiles.length === 0) return
     setBusy(true)
     setError(null)
     setDraft("")
@@ -129,6 +135,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
           sessionId: project.eveSessionId,
           continuationToken: project.eveContinuationToken,
           streamIndex: project.eveStreamIndex,
+          uploads: uploadedFiles,
         }),
       })
       const result = (await response.json()) as AgentResult & { error?: string }
@@ -167,11 +174,24 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     setBusy(true)
     setError(null)
     try {
-      const result = await approveDesign({ projectId: project._id })
+      const result = await answerPendingDesign("approve")
+      if (!result.committedDocument) {
+        throw new Error("Robin did not return an approved design.md.")
+      }
+      await saveAgentState({
+        projectId: project._id,
+        eveSessionId: result.sessionId,
+        eveContinuationToken: result.continuationToken,
+        eveStreamIndex: result.streamIndex,
+        pendingRequests: [],
+        pendingDiff: "",
+        proposedDocument: "",
+        document: result.committedDocument,
+      })
       await recordMessage({
         projectId: project._id,
         role: "assistant",
-        content: `Approved and saved design.md (${result.commitId}).`,
+        content: result.message ?? "Approved and saved design.md.",
       })
       setReviewOpen(false)
       setSelectedPath(DESIGN_PATH)
@@ -187,12 +207,23 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     setBusy(true)
     setError(null)
     try {
+      const result = await answerPendingDesign("deny")
       await saveAgentState({
         projectId: project._id,
+        eveSessionId: result.sessionId,
+        eveContinuationToken: result.continuationToken,
+        eveStreamIndex: result.streamIndex,
         pendingDiff: "",
         proposedDocument: "",
         pendingRequests: [],
       })
+      if (result.message) {
+        await recordMessage({
+          projectId: project._id,
+          role: "assistant",
+          content: result.message,
+        })
+      }
       setReviewOpen(false)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not discard.")
@@ -201,11 +232,40 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     }
   }
 
+  async function answerPendingDesign(optionId: "approve" | "deny") {
+    if (
+      !project?.eveSessionId ||
+      !project.eveContinuationToken ||
+      !project.pendingRequests?.length
+    ) {
+      throw new Error("Robin is not waiting for a design decision.")
+    }
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        projectId: project._id,
+        sessionId: project.eveSessionId,
+        continuationToken: project.eveContinuationToken,
+        streamIndex: project.eveStreamIndex,
+        inputResponses: project.pendingRequests.map((request) => ({
+          requestId: request.requestId,
+          optionId,
+        })),
+      }),
+    })
+    const result = (await response.json()) as AgentResult & { error?: string }
+    if (!response.ok) {
+      throw new Error(result.error ?? "Robin could not apply that decision.")
+    }
+    return result
+  }
+
   async function handleUploadFiles(files: FileList) {
     if (!project || uploading || busy) return
     setUploading(true)
     setError(null)
-    const uploaded: string[] = []
+    const uploaded: AgentUpload[] = []
     try {
       for (const file of Array.from(files)) {
         const uploadUrl = await generateUploadUrl()
@@ -217,14 +277,21 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         })
         if (!response.ok) throw new Error(`Failed to upload ${file.name}.`)
         const { storageId } = (await response.json()) as { storageId: string }
-        await createUpload({
+        const upload = await createUpload({
           projectId: project._id,
           name: file.name,
           storageId: storageId as Id<"_storage">,
           contentType,
           size: file.size,
         })
-        uploaded.push(file.name)
+        if (!upload.url) throw new Error(`Failed to prepare ${file.name}.`)
+        uploaded.push({
+          id: upload._id,
+          name: upload.name,
+          contentType: upload.contentType,
+          size: upload.size,
+          url: upload.url,
+        })
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Upload failed.")
@@ -236,12 +303,13 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     if (uploaded.length === 0) return
     const summary =
       uploaded.length === 1
-        ? uploaded[0]
-        : `${uploaded.length} files (${uploaded.join(", ")})`
+        ? uploaded[0]?.name
+        : `${uploaded.length} files (${uploaded.map((file) => file.name).join(", ")})`
     await sendTurn(
       `I uploaded ${summary}. Review the upload${
         uploaded.length === 1 ? "" : "s"
-      } and propose updates to design.md if anything is relevant.`
+      } and propose updates to design.md if anything is relevant.`,
+      uploaded
     )
   }
 

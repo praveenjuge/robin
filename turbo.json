@@ -6,6 +6,7 @@
       "dependsOn": ["^build"],
       "env": [
         "CLOUDFLARE_ACCOUNT_ID",
+        "EVE_AGENT_URL",
         "EVE_AGENT_PASSWORD",
         "EVE_AGENT_USERNAME",
         "R2_ACCESS_KEY_ID",
