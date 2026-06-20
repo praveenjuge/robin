@@ -9,8 +9,13 @@ import {
 import { Spinner } from "@workspace/ui/components/spinner"
 import { cn } from "@workspace/ui/lib/utils"
 import type { ChatStatus, FileUIPart } from "ai"
-import { CornerDownLeftIcon, SquareIcon, XIcon } from "lucide-react"
-import { useCallback, useState } from "react"
+import {
+  CornerDownLeftIcon,
+  PaperclipIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react"
+import { useCallback, useRef, useState } from "react"
 import type {
   ComponentProps,
   FormEvent,
@@ -114,6 +119,50 @@ export function PromptInputFooter({
       className={cn("justify-between gap-1", className)}
       {...props}
     />
+  )
+}
+
+export type PromptInputUploadProps = Omit<
+  ComponentProps<typeof InputGroupButton>,
+  "onClick"
+> & {
+  onFiles: (files: FileList) => void
+  uploading?: boolean
+}
+
+export function PromptInputUpload({
+  onFiles,
+  uploading,
+  disabled,
+  children,
+  ...props
+}: PromptInputUploadProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  return (
+    <>
+      <input
+        className="hidden"
+        multiple
+        onChange={(event) => {
+          if (event.target.files?.length) onFiles(event.target.files)
+          event.target.value = ""
+        }}
+        ref={inputRef}
+        type="file"
+      />
+      <InputGroupButton
+        aria-label="Upload files"
+        disabled={disabled || uploading}
+        onClick={() => inputRef.current?.click()}
+        size="icon-sm"
+        variant="ghost"
+        {...props}
+      >
+        {children ??
+          (uploading ? <Spinner /> : <PaperclipIcon className="size-4" />)}
+      </InputGroupButton>
+    </>
   )
 }
 

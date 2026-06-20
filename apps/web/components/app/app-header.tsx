@@ -5,7 +5,6 @@ import Link from "next/link"
 import { UserButton } from "@clerk/nextjs"
 import { Sparkles } from "lucide-react"
 import { Separator } from "@workspace/ui/components/separator"
-import { ThemeToggle } from "@/components/app/theme-toggle"
 
 export function AppHeader({
   children,
@@ -29,7 +28,7 @@ export function AppHeader({
       {children ? (
         <>
           <Separator
-            className="hidden h-5 sm:block"
+            className="hidden h-full sm:block"
             orientation="vertical"
           />
           <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -41,7 +40,6 @@ export function AppHeader({
       )}
       <div className="flex shrink-0 items-center gap-1">
         {actions}
-        <ThemeToggle />
         <UserButton />
       </div>
     </header>

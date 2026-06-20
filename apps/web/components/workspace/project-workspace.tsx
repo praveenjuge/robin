@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
+import { Badge } from "@workspace/ui/components/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,8 +36,11 @@ import {
   TaskItemFile,
   TaskTrigger,
 } from "@/components/ai-elements/task"
-import { DesignExplorer } from "@/components/workspace/design-explorer"
-import type { ProjectUpload } from "@/components/workspace/file-viewer"
+import { FileExplorer } from "@/components/workspace/file-explorer"
+import {
+  FileViewer,
+  type ProjectUpload,
+} from "@/components/workspace/file-viewer"
 import { ReviewChangesDialog } from "@/components/workspace/review-changes-dialog"
 import { WorkspaceChat } from "@/components/workspace/workspace-chat"
 import { api } from "@workspace/convex/api"
@@ -76,7 +80,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedPath, setSelectedPath] = useState<string>(DESIGN_PATH)
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [view, setView] = useState<"chat" | "files">("chat")
   const [reviewOpen, setReviewOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
@@ -97,7 +101,9 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     return { paths: [DESIGN_PATH, ...uploadPaths], uploadByPath: map }
   }, [uploads])
 
-  const selectedUpload = uploadByPath.get(selectedPath) ?? null
+  const selectedUpload = selectedPath
+    ? (uploadByPath.get(selectedPath) ?? null)
+    : null
   const hasPending = Boolean(project?.pendingDiff)
 
   async function sendTurn(rawMessage: string) {
@@ -196,9 +202,10 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   }
 
   async function handleUploadFiles(files: FileList) {
-    if (!project) return
+    if (!project || uploading || busy) return
     setUploading(true)
     setError(null)
+    const uploaded: string[] = []
     try {
       for (const file of Array.from(files)) {
         const uploadUrl = await generateUploadUrl()
@@ -217,18 +224,30 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
           contentType,
           size: file.size,
         })
+        uploaded.push(file.name)
       }
-      setView("files")
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Upload failed.")
+      return
     } finally {
       setUploading(false)
     }
+
+    if (uploaded.length === 0) return
+    const summary =
+      uploaded.length === 1
+        ? uploaded[0]
+        : `${uploaded.length} files (${uploaded.join(", ")})`
+    await sendTurn(
+      `I uploaded ${summary}. Review the upload${
+        uploaded.length === 1 ? "" : "s"
+      } and propose updates to design.md if anything is relevant.`
+    )
   }
 
   async function handleRemoveUpload(upload: ProjectUpload) {
-    if (selectedPath !== DESIGN_PATH && selectedUpload?._id === upload._id) {
-      setSelectedPath(DESIGN_PATH)
+    if (selectedUpload?._id === upload._id) {
+      setSelectedPath(null)
     }
     await removeUpload({ uploadId: upload._id })
   }
@@ -295,6 +314,32 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     </Task>
   ) : null
 
+  const designToolbar = (
+    <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5">
+      <div className="flex min-w-0 items-center gap-2">
+        <p className="truncate text-sm font-medium">design.md</p>
+        {hasPending && <Badge variant="secondary">Pending</Badge>}
+      </div>
+      <div className="flex items-center gap-1">
+        {hasPending && (
+          <Button onClick={() => setReviewOpen(true)} size="sm">
+            <GitBranch />
+            Review changes
+          </Button>
+        )}
+        <Button
+          aria-label="Download design.md"
+          onClick={downloadDesign}
+          size="icon-sm"
+          title="Download design.md"
+          variant="ghost"
+        >
+          <Download />
+        </Button>
+      </div>
+    </div>
+  )
+
   return (
     <div className="flex h-svh flex-col overflow-hidden">
       <AppHeader
@@ -332,10 +377,10 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         </Button>
       </div>
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(380px,40%)]">
+      <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[50%_20%_30%]">
         <section
           className={cn(
-            "flex min-h-0 min-w-0 flex-col lg:border-r",
+            "flex min-h-0 min-w-0 flex-1 flex-col lg:border-r",
             view === "files" && "hidden lg:flex"
           )}
         >
@@ -346,27 +391,36 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
             messages={messages ?? []}
             onDraftChange={setDraft}
             onSubmit={sendTurn}
+            onUploadFiles={handleUploadFiles}
             pending={pendingNode}
+            uploading={uploading}
           />
         </section>
         <aside
           className={cn(
-            "flex min-h-0 min-w-0 flex-col",
+            "flex min-h-0 min-w-0 flex-col lg:border-r",
+            "max-lg:h-64 max-lg:shrink-0",
             view === "chat" && "hidden lg:flex"
           )}
         >
-          <DesignExplorer
-            hasPending={hasPending}
-            onDownload={downloadDesign}
-            onRemoveUpload={handleRemoveUpload}
-            onReview={() => setReviewOpen(true)}
+          <FileExplorer
             onSelect={setSelectedPath}
-            onUploadFiles={handleUploadFiles}
             paths={paths}
-            project={project}
+            selectedPath={selectedPath}
+          />
+        </aside>
+        <aside
+          className={cn(
+            "flex min-h-0 min-w-0 flex-1 flex-col",
+            view === "chat" && "hidden lg:flex"
+          )}
+        >
+          <FileViewer
+            designToolbar={designToolbar}
+            document={project.document}
+            onRemoveUpload={handleRemoveUpload}
             selectedPath={selectedPath}
             selectedUpload={selectedUpload}
-            uploading={uploading}
           />
         </aside>
       </div>

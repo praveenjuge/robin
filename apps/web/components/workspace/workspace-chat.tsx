@@ -21,6 +21,7 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputUpload,
 } from "@/components/ai-elements/prompt-input"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 
@@ -38,6 +39,8 @@ export function WorkspaceChat({
   draft,
   onDraftChange,
   onSubmit,
+  onUploadFiles,
+  uploading,
   pending,
 }: {
   messages: Doc<"messages">[]
@@ -46,6 +49,8 @@ export function WorkspaceChat({
   draft: string
   onDraftChange: (value: string) => void
   onSubmit: (value: string) => void
+  onUploadFiles: (files: FileList) => void
+  uploading: boolean
   pending?: ReactNode
 }) {
   const isEmpty = messages.length === 0
@@ -116,9 +121,11 @@ export function WorkspaceChat({
               value={draft}
             />
             <PromptInputFooter>
-              <span className="text-xs text-muted-foreground">
-                Changes require your approval
-              </span>
+              <PromptInputUpload
+                disabled={busy}
+                onFiles={onUploadFiles}
+                uploading={uploading}
+              />
               <PromptInputSubmit
                 disabled={busy || !draft.trim()}
                 status={busy ? "submitted" : "ready"}

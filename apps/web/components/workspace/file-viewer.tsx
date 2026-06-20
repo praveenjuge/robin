@@ -29,7 +29,7 @@ export function FileViewer({
   designToolbar?: ReactNode
   onRemoveUpload?: (upload: ProjectUpload) => void
 }) {
-  if (selectedPath === DESIGN_PATH || (!selectedUpload && !selectedPath)) {
+  if (selectedPath === DESIGN_PATH) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {designToolbar}
