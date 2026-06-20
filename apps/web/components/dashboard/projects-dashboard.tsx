@@ -13,7 +13,6 @@ import {
   Search,
   Trash2,
 } from "lucide-react"
-import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import {
   DropdownMenu,
@@ -207,14 +206,6 @@ function ProjectCard({
         <p className="text-xs text-muted-foreground">
           Updated {formatRelativeTime(project.updatedAt)}
         </p>
-      </div>
-
-      <div className="flex items-center gap-2">
-        {project.latestCommit ? (
-          <Badge variant="outline">Committed</Badge>
-        ) : (
-          <Badge variant="ghost">Draft</Badge>
-        )}
       </div>
     </div>
   )

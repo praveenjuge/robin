@@ -141,7 +141,6 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const projects = useQuery(api.projects.list)
   const uploads = useQuery(api.uploads.list, { projectId: id })
 
-  const saveDocument = useMutation(api.projects.saveDocument)
   const saveAgentSession = useMutation(api.projects.saveAgentSession)
   const renameProject = useMutation(api.projects.rename)
   const removeProject = useMutation(api.projects.remove)
@@ -183,6 +182,11 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const hydratedSessionRef = useRef<string | null>(null)
 
+  // eve/R2 is the source of truth for design.md. The browser holds a render
+  // copy: hydrated from the agent on load (covers cross-device and reloads) and
+  // updated optimistically when a commit returns the approved document.
+  const [designDoc, setDesignDoc] = useState<string | null>(null)
+
   useEffect(() => {
     if (typeof window === "undefined") return
     window.localStorage.setItem(
@@ -190,6 +194,26 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       JSON.stringify(agentState)
     )
   }, [projectId, agentState])
+
+  // Hydrate design.md from the agent once the project is loaded. The page keys
+  // this component on projectId, so it remounts per project and this runs once.
+  // setDesignDoc only fills a still-empty copy, so a commit that lands during
+  // the fetch is never clobbered by the slower read.
+  const projectLoaded = Boolean(project)
+  useEffect(() => {
+    if (!projectLoaded) return
+    let cancelled = false
+    fetch(`/api/design?projectId=${encodeURIComponent(projectId)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { document?: string } | null) => {
+        if (cancelled || typeof data?.document !== "string") return
+        setDesignDoc((prev) => (prev === null ? data.document! : prev))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [projectLoaded, projectId])
 
   // Replay the session into the transcript once per session id. We only fill an
   // empty transcript so an in-flight optimistic turn is never clobbered by a
@@ -304,10 +328,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       })
       persistCursor(cursor)
       if (committed && result.committedDocument) {
-        await saveDocument({
-          projectId: project._id,
-          document: result.committedDocument,
-        })
+        setDesignDoc(result.committedDocument)
       }
       if (result.diff) setSelectedPath(DESIGN_PATH)
     } catch (cause) {
@@ -329,10 +350,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       const cursor = cursorFromResult(result)
       setAgentState({ session: cursor, pending: null })
       persistCursor(cursor)
-      await saveDocument({
-        projectId: project._id,
-        document: result.committedDocument,
-      })
+      setDesignDoc(result.committedDocument)
       appendMessage(
         "assistant",
         result.message ?? "Approved and saved design.md."
@@ -456,7 +474,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   function downloadDesign() {
     if (!project) return
     const url = URL.createObjectURL(
-      new Blob([project.document], { type: "text/markdown" })
+      new Blob([designDoc ?? ""], { type: "text/markdown" })
     )
     const link = Object.assign(document.createElement("a"), {
       href: url,
@@ -618,7 +636,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
         >
           <FileViewer
             designToolbar={designToolbar}
-            document={project.document}
+            document={designDoc ?? ""}
             onRemoveUpload={handleRemoveUpload}
             selectedPath={selectedPath}
             selectedUpload={selectedUpload}

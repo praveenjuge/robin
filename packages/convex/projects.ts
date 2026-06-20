@@ -2,46 +2,15 @@ import { ConvexError, v } from "convex/values"
 import { mutation, query } from "./_generated/server"
 import type { Id } from "./_generated/dataModel"
 
-const starterDoc = `---
-color:
-  primary: "#1B4D3E"
-  surface: "#FFFFFF"
-  text: "#111111"
-typography:
-  font_sans: "Inter"
-  scale: [12, 14, 16, 20, 24, 32, 48]
-spacing: [2, 4, 8, 12, 16, 24, 32, 48]
-radius: { sm: 4, md: 8, lg: 16, pill: 999 }
-components:
-  button: { radius: pill, height: 40, weight: 600 }
----
-
-## Overview
-Robin has not learned this project yet.
-
-## Principles
-- Keep interfaces direct and legible.
-
-## Voice & tone
-Clear, calm, and specific.
-
-## Components
-Capture component guidance as Robin learns it.
-
-## Don'ts
-- Do not invent tokens without a source.
-`
-
 const projectFields = {
   _id: v.id("projects"),
   _creationTime: v.number(),
   ownerId: v.string(),
   name: v.string(),
-  document: v.string(),
-  latestCommit: v.optional(v.string()),
   updatedAt: v.number(),
-  // The eve agent owns the durable session; Convex stores the cursor so the
-  // chat is recoverable across devices. See schema.ts.
+  // The eve agent owns the durable session and the design.md document (in R2).
+  // Convex stores the session cursor so the chat is recoverable across devices.
+  // See schema.ts.
   eveSessionId: v.optional(v.string()),
   eveContinuationToken: v.optional(v.string()),
   eveStreamIndex: v.optional(v.number()),
@@ -92,7 +61,6 @@ export const create = mutation({
     return await ctx.db.insert("projects", {
       ownerId: identity.subject,
       name: cleanName,
-      document: starterDoc,
       updatedAt: Date.now(),
     })
   },
@@ -142,34 +110,6 @@ export const remove = mutation({
       })
     )
     await ctx.db.delete(projectId as Id<"projects">)
-    return null
-  },
-})
-
-// Persists an approved design.md back to the project record. The eve agent
-// owns the durable session and the R2 commit; Convex only mirrors the latest
-// committed document so the workspace can render and download it.
-export const saveDocument = mutation({
-  args: {
-    projectId: v.id("projects"),
-    document: v.string(),
-    commitId: v.optional(v.string()),
-  },
-  returns: v.null(),
-  async handler(ctx, { projectId, document, commitId }) {
-    const identity = await ctx.auth.getUserIdentity()
-    if (!identity) throw new ConvexError("Not authenticated")
-    const project = await ctx.db.get(projectId)
-    if (!project || project.ownerId !== identity.subject) {
-      throw new ConvexError("Project not found")
-    }
-    if (document.length > 80_000)
-      throw new ConvexError("Document is too large.")
-    await ctx.db.patch(projectId as Id<"projects">, {
-      document,
-      latestCommit: commitId ?? `r2-${Date.now().toString(36)}`,
-      updatedAt: Date.now(),
-    })
     return null
   },
 })

@@ -32,7 +32,7 @@ export default function OpenGraphImage() {
             width: "72px",
             height: "72px",
             borderRadius: "20px",
-            background: "#6366f1",
+            background: "#c2410c",
             fontSize: "40px",
             fontWeight: 700,
           }}
