@@ -17,6 +17,7 @@ import { Button } from "@workspace/ui/components/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -448,19 +449,21 @@ function ProjectSwitcher({
         <ChevronsUpDown className="shrink-0 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel>Projects</DropdownMenuLabel>
-        {projects.map((project) => (
-          <DropdownMenuItem
-            key={project._id}
-            onClick={() => {
-              if (project._id !== current._id) {
-                router.push(`/projects/${project._id}`)
-              }
-            }}
-          >
-            <span className="truncate">{project.name}</span>
-          </DropdownMenuItem>
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Projects</DropdownMenuLabel>
+          {projects.map((project) => (
+            <DropdownMenuItem
+              key={project._id}
+              onClick={() => {
+                if (project._id !== current._id) {
+                  router.push(`/projects/${project._id}`)
+                }
+              }}
+            >
+              <span className="truncate">{project.name}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={onCreate}>
           <Plus />
