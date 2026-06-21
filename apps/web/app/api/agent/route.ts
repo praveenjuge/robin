@@ -32,8 +32,11 @@ type TranscriptMessage = {
 export const runtime = "nodejs"
 
 // Replays the durable eve session into the chat transcript. eve is the system
-// of record for the conversation, so cold loads rebuild history by streaming
-// the session from the start rather than reading a mirrored Convex table.
+// of record for the conversation and owns the event-shape logic, so cold loads
+// proxy to the agent's transcript channel (agent/channels/transcript.ts), which
+// rebuilds history from the durable session. Auth posture matches GET
+// /api/design: a signed-in Clerk user plus a project-id format check; the agent
+// re-checks its own inbound auth.
 export async function GET(request: Request) {
   const { userId } = await auth()
   if (!userId)
@@ -75,46 +78,27 @@ export async function GET(request: Request) {
       { status: 500 }
     )
 
-  const client = new Client({ host, auth: { basic: { username, password } } })
-  const session = client.session({ sessionId, streamIndex: 0 })
+  const credentials = Buffer.from(`${username}:${password}`).toString("base64")
+  const target = `${host.replace(/\/$/, "")}/robin/v1/transcript?projectId=${encodeURIComponent(
+    projectId
+  )}&sessionId=${encodeURIComponent(sessionId)}&streamIndex=${streamIndex}`
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 20_000)
+  const timeout = setTimeout(() => controller.abort(), 25_000)
   try {
-    const messages: TranscriptMessage[] = []
-    let consumed = 0
-    for await (const event of session.stream({
-      startIndex: 0,
+    const response = await fetch(target, {
+      headers: { authorization: `Basic ${credentials}` },
+      cache: "no-store",
       signal: controller.signal,
-    })) {
-      consumed++
-      if (event.type === "message.received") {
-        const content = event.data.message.trim()
-        if (content)
-          messages.push({ id: `eve-${consumed}`, role: "user", content })
-      } else if (
-        event.type === "message.completed" &&
-        event.data.finishReason !== "tool-calls" &&
-        event.data.message
-      ) {
-        const content = event.data.message.trim()
-        if (content)
-          messages.push({ id: `eve-${consumed}`, role: "assistant", content })
-      }
-      if (event.type === "session.completed" || event.type === "session.failed")
-        break
-      if (consumed >= streamIndex) break
-    }
-    return NextResponse.json({ messages })
-  } catch (cause) {
-    // A pruned or expired session (eve sessions are durable, not permanent) has
-    // no transcript to replay. Treat it as empty history so the chat still
-    // opens and the user can start a fresh turn.
-    if (
-      cause instanceof ClientError &&
-      (cause.status === 404 || cause.status === 410)
-    )
-      return NextResponse.json({ messages: [] })
+    })
+    if (!response.ok)
+      return NextResponse.json(
+        { error: "Robin could not load the conversation history." },
+        { status: 502 }
+      )
+    const data = (await response.json()) as { messages?: TranscriptMessage[] }
+    return NextResponse.json({ messages: data.messages ?? [] })
+  } catch {
     return NextResponse.json(
       { error: "Robin could not load the conversation history." },
       { status: 502 }
