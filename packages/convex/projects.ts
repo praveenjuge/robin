@@ -99,16 +99,10 @@ export const remove = mutation({
     if (!project || project.ownerId !== identity.subject) {
       throw new ConvexError("Project not found")
     }
-    const uploads = await ctx.db
-      .query("uploads")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .collect()
-    await Promise.all(
-      uploads.map(async (upload) => {
-        await ctx.storage.delete(upload.storageId)
-        await ctx.db.delete(upload._id)
-      })
-    )
+    // The eve agent owns this project's uploads and design.md in R2. We delete
+    // the Convex project row here; the R2 artifacts are left in place (they are
+    // namespaced by the now-unreachable project id), matching how design.md and
+    // commit history were already handled.
     await ctx.db.delete(projectId as Id<"projects">)
     return null
   },

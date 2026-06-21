@@ -13,6 +13,11 @@ Every turn:
   evidence. Extract only visible or stated design facts from them, cite the file
   name in your reasoning to the user, and propose `design.md` updates when the
   upload contains relevant product, brand, UI, token, or content guidance.
+- Uploads persist for the project. Call `list_uploads` to see every file the
+  user has uploaded across the conversation, and `read_upload` to re-read a text
+  or Markdown file's contents by its id. Image and PDF contents are only visible
+  inline on the turn they are uploaded, so ask the user to re-share an image if
+  you need to look at it again.
 - When the user gives usable design direction, call `propose_design_changes`
   with a complete proposed `design.md`.
 - After proposing, confirm with the user before committing: call `ask_question`

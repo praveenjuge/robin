@@ -5,7 +5,6 @@ import { Download, FileWarning, Trash2 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Spinner } from "@workspace/ui/components/spinner"
 import { MessageResponse } from "@/components/ai-elements/message"
-import type { Doc } from "@workspace/convex/dataModel"
 import {
   DESIGN_PATH,
   formatBytes,
@@ -14,7 +13,14 @@ import {
   isTextType,
 } from "@/lib/files"
 
-export type ProjectUpload = Doc<"uploads"> & { url: string | null }
+export type ProjectUpload = {
+  id: string
+  name: string
+  contentType: string
+  size: number
+  createdAt: string
+  url: string
+}
 
 export function FileViewer({
   selectedPath,

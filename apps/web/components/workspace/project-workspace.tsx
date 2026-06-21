@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useMutation, useQuery } from "convex/react"
@@ -63,7 +63,6 @@ type AgentUpload = {
   name: string
   contentType: string
   size: number
-  url: string
 }
 
 // The eve agent owns the durable session; the browser only holds the
@@ -139,19 +138,16 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
 
   const project = useQuery(api.projects.get, { projectId: id })
   const projects = useQuery(api.projects.list)
-  const uploads = useQuery(api.uploads.list, { projectId: id })
 
   const saveAgentSession = useMutation(api.projects.saveAgentSession)
   const renameProject = useMutation(api.projects.rename)
   const removeProject = useMutation(api.projects.remove)
-  const generateUploadUrl = useMutation(api.uploads.generateUploadUrl)
-  const createUpload = useMutation(api.uploads.create)
-  const removeUpload = useMutation(api.uploads.remove)
 
   const [draft, setDraft] = useState("")
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [uploads, setUploads] = useState<ProjectUpload[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [view, setView] = useState<"chat" | "files">("chat")
   const [reviewOpen, setReviewOpen] = useState(false)
@@ -251,11 +247,42 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
 
   const createProject = useMutation(api.projects.create)
 
+  // eve owns uploads in R2. The handlers call this after an upload or delete to
+  // reconcile the file tree; there is no reactive Convex query for uploads.
+  const refreshUploads = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `/api/uploads?projectId=${encodeURIComponent(projectId)}`
+      )
+      if (!response.ok) return
+      const data = (await response.json()) as { uploads?: ProjectUpload[] }
+      setUploads(data.uploads ?? [])
+    } catch {
+      // best-effort; the file tree just shows design.md until this succeeds
+    }
+  }, [projectId])
+
+  // Initial load. Mirrors the design.md hydrate effect's cancellable fetch so a
+  // fast remount never lands a stale list.
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/uploads?projectId=${encodeURIComponent(projectId)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { uploads?: ProjectUpload[] } | null) => {
+        if (cancelled || !data) return
+        setUploads(data.uploads ?? [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
   const { paths, uploadByPath } = useMemo(() => {
     const seen = new Map<string, number>()
     const map = new Map<string, ProjectUpload>()
     const uploadPaths: string[] = []
-    for (const upload of uploads ?? []) {
+    for (const upload of uploads) {
       const path = uploadTreePath(upload.name, seen)
       map.set(path, upload)
       uploadPaths.push(path)
@@ -343,7 +370,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     setBusy(true)
     setError(null)
     try {
-      const result = await answerPendingDesign("approve")
+      const result = await answerPendingDesign("commit")
       if (!result.committedDocument) {
         throw new Error("Robin did not return an approved design.md.")
       }
@@ -369,7 +396,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     setBusy(true)
     setError(null)
     try {
-      const result = await answerPendingDesign("deny")
+      const result = await answerPendingDesign("cancel")
       const cursor = cursorFromResult(result)
       setAgentState({ session: cursor, pending: null })
       persistCursor(cursor)
@@ -382,7 +409,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     }
   }
 
-  async function answerPendingDesign(optionId: "approve" | "deny") {
+  async function answerPendingDesign(optionId: "commit" | "cancel") {
     if (
       !project ||
       !session?.sessionId ||
@@ -419,29 +446,25 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     const uploaded: AgentUpload[] = []
     try {
       for (const file of Array.from(files)) {
-        const uploadUrl = await generateUploadUrl()
-        const contentType = file.type || "application/octet-stream"
-        const response = await fetch(uploadUrl, {
+        const form = new FormData()
+        form.set("projectId", project._id)
+        form.set("file", file)
+        const response = await fetch("/api/uploads", {
           method: "POST",
-          headers: { "content-type": contentType },
-          body: file,
+          body: form,
         })
-        if (!response.ok) throw new Error(`Failed to upload ${file.name}.`)
-        const { storageId } = (await response.json()) as { storageId: string }
-        const upload = await createUpload({
-          projectId: project._id,
-          name: file.name,
-          storageId: storageId as Id<"_storage">,
-          contentType,
-          size: file.size,
-        })
-        if (!upload.url) throw new Error(`Failed to prepare ${file.name}.`)
+        const data = (await response.json()) as {
+          upload?: ProjectUpload
+          error?: string
+        }
+        if (!response.ok || !data.upload) {
+          throw new Error(data.error ?? `Failed to upload ${file.name}.`)
+        }
         uploaded.push({
-          id: upload._id,
-          name: upload.name,
-          contentType: upload.contentType,
-          size: upload.size,
-          url: upload.url,
+          id: data.upload.id,
+          name: data.upload.name,
+          contentType: data.upload.contentType,
+          size: data.upload.size,
         })
       }
     } catch (cause) {
@@ -451,6 +474,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       setUploading(false)
     }
 
+    await refreshUploads()
     if (uploaded.length === 0) return
     const summary =
       uploaded.length === 1
@@ -465,10 +489,20 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
   }
 
   async function handleRemoveUpload(upload: ProjectUpload) {
-    if (selectedUpload?._id === upload._id) {
+    if (selectedUpload?.id === upload.id) {
       setSelectedPath(null)
     }
-    await removeUpload({ uploadId: upload._id })
+    try {
+      await fetch(
+        `/api/uploads/${encodeURIComponent(upload.id)}?projectId=${encodeURIComponent(
+          projectId
+        )}`,
+        { method: "DELETE" }
+      )
+    } catch {
+      // best-effort; the list refresh below reconciles the tree
+    }
+    await refreshUploads()
   }
 
   function downloadDesign() {

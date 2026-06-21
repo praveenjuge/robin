@@ -3,13 +3,12 @@ import { NextResponse } from "next/server"
 import { Client, ClientError } from "eve/client"
 import type { HandleMessageStreamEvent } from "eve/client"
 
-type InputResponse = { requestId: string; optionId: "approve" | "deny" }
+type InputResponse = { requestId: string; optionId: "commit" | "cancel" }
 type UploadManifest = {
   id: string
   name: string
   contentType: string
   size: number
-  url: string
 }
 type AgentBody = {
   projectId?: string
@@ -153,7 +152,12 @@ export async function POST(request: Request) {
   try {
     uploads =
       body.uploads && body.uploads.length > 0
-        ? await loadUploadParts(body.uploads)
+        ? await loadUploadParts(body.uploads, {
+            host,
+            username,
+            password,
+            projectId: body.projectId ?? "",
+          })
         : []
   } catch (cause) {
     return NextResponse.json(
@@ -270,7 +274,7 @@ function validateBody(value: unknown) {
           !response ||
           typeof response.requestId !== "string" ||
           !/^[a-z0-9_-]{1,200}$/i.test(response.requestId) ||
-          !["approve", "deny"].includes(response.optionId)
+          !["commit", "cancel"].includes(response.optionId)
       )
     )
       return "Invalid approval response."
@@ -291,7 +295,7 @@ function validateUpload(upload: unknown) {
   const item = upload as UploadManifest
   return (
     typeof item.id !== "string" ||
-    !/^[a-z0-9:_-]{8,80}$/i.test(item.id) ||
+    !/^[a-z0-9:_-]{8,100}$/i.test(item.id) ||
     typeof item.name !== "string" ||
     item.name.length < 1 ||
     item.name.length > 120 ||
@@ -299,9 +303,7 @@ function validateUpload(upload: unknown) {
     !isAllowedContentType(item.contentType) ||
     !Number.isInteger(item.size) ||
     item.size < 1 ||
-    item.size > 25_000_000 ||
-    typeof item.url !== "string" ||
-    !isTrustedConvexStorageUrl(item.url)
+    item.size > 25_000_000
   )
 }
 
@@ -375,16 +377,35 @@ function buildMessage(message = "", uploads: EveMessagePart[]) {
   ]
 }
 
-async function loadUploadParts(uploads: UploadManifest[]) {
+async function loadUploadParts(
+  uploads: UploadManifest[],
+  config: {
+    host: string
+    username: string
+    password: string
+    projectId: string
+  }
+) {
+  const authHeader = `Basic ${Buffer.from(
+    `${config.username}:${config.password}`
+  ).toString("base64")}`
+  const base = config.host.replace(/\/$/, "")
   return await Promise.all(
     uploads.map(async (upload) => {
-      const response = await fetch(upload.url, { redirect: "manual" })
+      // Read the bytes straight from the eve agent, the R2 owner, so the model
+      // sees the file inline this turn. The agent also persists it, so later
+      // turns can revisit it via the list_uploads / read_upload tools.
+      const target = `${base}/robin/v1/uploads/${encodeURIComponent(
+        upload.id
+      )}?projectId=${encodeURIComponent(config.projectId)}`
+      const response = await fetch(target, {
+        headers: { authorization: authHeader },
+        cache: "no-store",
+      })
       const length = Number(response.headers.get("content-length") ?? 0)
       const type = response.headers.get("content-type") ?? upload.contentType
       if (
         !response.ok ||
-        response.status >= 300 ||
-        response.status < 200 ||
         (length > 0 && length > upload.size) ||
         !isAllowedContentType(type)
       ) {
@@ -408,15 +429,4 @@ function isAllowedContentType(contentType: string) {
   return /^(image\/(png|jpe?g|webp|gif)|text\/plain|text\/markdown|application\/pdf)(;|$)/i.test(
     contentType
   )
-}
-
-function isTrustedConvexStorageUrl(value: string) {
-  try {
-    const url = new URL(value)
-    const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL
-    if (!convexUrl || url.protocol !== "https:") return false
-    return url.hostname === new URL(convexUrl).hostname
-  } catch {
-    return false
-  }
 }

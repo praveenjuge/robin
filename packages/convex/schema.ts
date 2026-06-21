@@ -15,13 +15,4 @@ export default defineSchema({
     eveContinuationToken: v.optional(v.string()),
     eveStreamIndex: v.optional(v.number()),
   }).index("by_owner", ["ownerId"]),
-  uploads: defineTable({
-    projectId: v.id("projects"),
-    ownerId: v.string(),
-    name: v.string(),
-    storageId: v.id("_storage"),
-    contentType: v.string(),
-    size: v.number(),
-    createdAt: v.number(),
-  }).index("by_project", ["projectId"]),
 })
