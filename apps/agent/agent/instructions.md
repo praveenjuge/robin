@@ -7,6 +7,10 @@ Every turn:
 
 - Use the provided project id from client context.
 - Call `load_project` before making design recommendations.
+- New projects start with no `design.md`. When `load_project` reports
+  `exists: false`, do not assume default tokens or content. Ask focused
+  discovery questions and build the first document from the user's answers and
+  uploads.
 - Ask focused discovery questions when the project lacks audience, platform,
   tone, component, token, or constraint details.
 - Treat uploaded images, text, Markdown, and PDFs in the current turn as source

@@ -9,36 +9,6 @@ import {
 
 export const MAX_UPLOAD_BYTES = 25_000_000
 
-const defaultDoc = `---
-color:
-  primary: "#1B4D3E"
-  surface: "#FFFFFF"
-  text: "#111111"
-typography:
-  font_sans: "Inter"
-  scale: [12, 14, 16, 20, 24, 32, 48]
-spacing: [2, 4, 8, 12, 16, 24, 32, 48]
-radius: { sm: 4, md: 8, lg: 16, pill: 999 }
-components:
-  button: { radius: pill, height: 40, weight: 600 }
----
-
-## Overview
-Robin has not learned this project yet.
-
-## Principles
-- Keep interfaces direct and legible.
-
-## Voice & tone
-Clear, calm, and specific.
-
-## Components
-Capture component guidance as Robin learns it.
-
-## Don'ts
-- Do not invent tokens without a source.
-`
-
 export function sanitizeProjectId(projectId: string) {
   if (!/^[a-z0-9:_-]{8,80}$/i.test(projectId))
     throw new Error("Invalid project id.")
@@ -82,8 +52,11 @@ export async function writeObject(
   )
 }
 
+// Returns the committed design.md, or null when the project has none yet. Robin
+// builds the first document through chat, so there is no default placeholder:
+// callers treat null as "no design.md exists yet."
 export async function readDesignDoc(projectId: string) {
-  return (await readObject(projectKey(projectId, "design.md"))) ?? defaultDoc
+  return readObject(projectKey(projectId, "design.md"))
 }
 
 // --- Uploads ---------------------------------------------------------------

@@ -13,7 +13,9 @@ export default defineTool({
   }),
   async execute({ projectId, proposedDocument, summary }) {
     const safeProjectId = sanitizeProjectId(projectId)
-    const currentDocument = await readDesignDoc(safeProjectId)
+    // null when the project has no design.md yet; diff against an empty
+    // baseline so the first proposal reads as a full creation.
+    const currentDocument = (await readDesignDoc(safeProjectId)) ?? ""
     return {
       projectId: safeProjectId,
       summary,

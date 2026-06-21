@@ -258,7 +258,7 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       const data = (await response.json()) as { uploads?: ProjectUpload[] }
       setUploads(data.uploads ?? [])
     } catch {
-      // best-effort; the file tree just shows design.md until this succeeds
+      // best-effort; the file tree just reconciles uploads on the next refresh
     }
   }, [projectId])
 
@@ -278,6 +278,10 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
     }
   }, [projectId])
 
+  // design.md only belongs in the file tree once Robin has committed one. New
+  // projects start with no document (designDoc stays null until a commit or a
+  // hydrate that finds an existing doc), so the tree shows uploads only.
+  const designExists = Boolean(designDoc)
   const { paths, uploadByPath } = useMemo(() => {
     const seen = new Map<string, number>()
     const map = new Map<string, ProjectUpload>()
@@ -287,8 +291,11 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       map.set(path, upload)
       uploadPaths.push(path)
     }
-    return { paths: [DESIGN_PATH, ...uploadPaths], uploadByPath: map }
-  }, [uploads])
+    return {
+      paths: designExists ? [DESIGN_PATH, ...uploadPaths] : uploadPaths,
+      uploadByPath: map,
+    }
+  }, [uploads, designExists])
 
   const selectedUpload = selectedPath
     ? (uploadByPath.get(selectedPath) ?? null)
@@ -356,8 +363,13 @@ export function ProjectWorkspace({ projectId }: { projectId: string }) {
       persistCursor(cursor)
       if (committed && result.committedDocument) {
         setDesignDoc(result.committedDocument)
+        setSelectedPath(DESIGN_PATH)
+      } else if (result.diff && designDoc) {
+        // Only open design.md when it already exists. A first-time proposal has
+        // no committed document yet, so the file stays out of the tree (and the
+        // viewer) until the user approves it.
+        setSelectedPath(DESIGN_PATH)
       }
-      if (result.diff) setSelectedPath(DESIGN_PATH)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Something went wrong.")
     } finally {

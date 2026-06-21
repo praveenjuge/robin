@@ -11,7 +11,10 @@ export const runtime = "nodejs"
 export async function GET(request: Request) {
   const { userId } = await auth()
   if (!userId)
-    return NextResponse.json({ error: "Sign in to use Robin." }, { status: 401 })
+    return NextResponse.json(
+      { error: "Sign in to use Robin." },
+      { status: 401 }
+    )
 
   const url = new URL(request.url)
   const projectId = url.searchParams.get("projectId") ?? ""
@@ -45,8 +48,10 @@ export async function GET(request: Request) {
         { error: "Robin could not load design.md." },
         { status: 502 }
       )
-    const data = (await response.json()) as { document?: string }
-    return NextResponse.json({ document: data.document ?? "" })
+    const data = (await response.json()) as { document?: string | null }
+    // null means the project has no committed design.md yet; preserve it so the
+    // workspace can keep design.md out of the file tree until Robin creates one.
+    return NextResponse.json({ document: data.document ?? null })
   } catch {
     return NextResponse.json(
       { error: "Robin could not load design.md." },
