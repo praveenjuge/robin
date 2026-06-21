@@ -123,7 +123,7 @@ export function WorkspaceChat({
           <PromptInput onSubmit={({ text }) => onSubmit(text)}>
             <PromptInputTextarea
               disabled={busy}
-              maxLength={4000}
+              maxLength={26000}
               onChange={(event) => onDraftChange(event.target.value)}
               placeholder="Describe the product, audience, tone, tokens, or constraints..."
               value={draft}
