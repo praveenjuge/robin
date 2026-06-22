@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next"
 import { ClerkProvider } from "@clerk/nextjs"
+import { shadcn } from "@clerk/ui/themes"
 import { Geist, Geist_Mono } from "next/font/google"
 
 import "@workspace/ui/globals.css"
@@ -87,7 +88,7 @@ export default function RootLayout({
       )}
     >
       <body>
-        <ClerkProvider>
+        <ClerkProvider appearance={{ theme: shadcn }}>
           <ThemeProvider>
             <ConvexClientProvider>{children}</ConvexClientProvider>
           </ThemeProvider>

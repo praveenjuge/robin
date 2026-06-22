@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.7",
+    "@clerk/ui": "^1.20.0",
     "@pierre/trees": "^1.0.0-beta.4",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",
