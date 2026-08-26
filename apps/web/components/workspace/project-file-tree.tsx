@@ -37,13 +37,17 @@ export function ProjectFileTree({
   className,
 }: ProjectFileTreeProps) {
   // Refs let the (stable) tree callbacks read the latest props without
-  // recreating the model, which `useFileTree` only builds once.
+  // recreating the model, which `useFileTree` only builds once. Syncing via
+  // effect avoids accessing refs during render (react-hooks/refs).
   const filePathsRef = useRef(new Set(paths))
-  filePathsRef.current = new Set(paths)
   const onSelectRef = useRef(onSelect)
-  onSelectRef.current = onSelect
   const expandedRef = useRef(expandedPaths)
-  expandedRef.current = expandedPaths
+
+  useEffect(() => {
+    filePathsRef.current = new Set(paths)
+    onSelectRef.current = onSelect
+    expandedRef.current = expandedPaths
+  })
 
   const { model } = useFileTree({
     paths,
