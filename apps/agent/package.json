@@ -13,22 +13,22 @@
     "typecheck": "tsgo"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1073.0",
+    "@aws-sdk/client-s3": "^3.1124.0",
     "@vercel/connect": "0.2.5",
-    "ai": "7.0.0-beta.178",
-    "eve": "^0.11.8",
-    "zod": "4.4.3"
+    "ai": "7.0.90",
+    "eve": "^0.49.0",
+    "zod": "4.5.4"
   },
   "devDependencies": {
-    "@types/node": "24.x",
+    "@types/node": "26.x",
     "@typescript/native-preview": "7.0.0-dev.20260620.1",
-    "microsandbox": "^0.5.7"
+    "microsandbox": "^0.6.16"
   },
   "overrides": {
-    "ai": "7.0.0-beta.178"
+    "ai": "7.0.90"
   },
   "resolutions": {
-    "ai": "7.0.0-beta.178"
+    "ai": "7.0.90"
   },
   "engines": {
     "node": "24.x"
