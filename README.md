@@ -7,9 +7,9 @@ so coding agents and people share one source of truth.
 ## Stack
 
 - [Next.js](https://nextjs.org) web app with [Clerk](https://clerk.com) auth
-- [Convex](https://convex.dev) backend (projects, messages, uploads)
-- [Eve](https://eve.dev) AI agent framework for the Robin agent
-- [Cloudflare R2](https://developers.cloudflare.com/r2/) for design file storage
+- [Convex](https://convex.dev) backend (projects and the eve session cursor)
+- [Eve](https://eve.dev) AI agent that owns the chat transcript and `design.md`
+- [Cloudflare R2](https://developers.cloudflare.com/r2/) for `design.md` and uploads
 - [shadcn/ui](https://ui.shadcn.com) component library
 - [Turborepo](https://turbo.build) + [Bun](https://bun.sh) monorepo
 
@@ -32,16 +32,18 @@ packages/
 # install dependencies
 bun install
 
-# copy env vars and fill in values (see .env.example)
+# copy env vars, then fill in the matching section of each file
 cp .env.example apps/web/.env.local
 cp .env.example apps/agent/.env.local
 
-# run everything
+# Convex, the web app, and the Eve agent
 bun run dev
 ```
 
 See `.env.example` for the full list of required environment variables and
-where each one belongs.
+where each one belongs. `convex dev` writes `CONVEX_DEPLOYMENT` and
+`NEXT_PUBLIC_CONVEX_URL` on first run; Clerk, R2, and the shared agent
+credential you fill in yourself.
 
 ## Scripts
 
