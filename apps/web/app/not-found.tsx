@@ -13,10 +13,8 @@ export default function NotFound() {
       </h1>
       <div className="max-w-xl text-base leading-7 text-muted-foreground">
         <p>
-          The path you requested returned a 404. Robin is a living design memory
-          for your projects — chat to capture design decisions, review every
-          proposed change, and keep a single design.md your coding agents can
-          build from.
+          The path you requested is not on Robin. Sign in from home, or open a
+          project under /projects once you are signed in.
         </p>
       </div>
       <section className="flex flex-col gap-2">
@@ -29,7 +27,7 @@ export default function NotFound() {
             >
               Home
             </Link>{" "}
-            — sign in or explore what Robin does
+            to sign in or start a project
           </li>
           <li>Project pages live under /projects and require signing in</li>
         </ul>
